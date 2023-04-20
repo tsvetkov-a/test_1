@@ -1,0 +1,116 @@
+function getorderstage(o_id in number) return varchar2 is
+    /* Возвращает стадию обработки заказа */
+    /* 04.06.2008 Трунов - исправлен статус "осмечен" ('02')*/
+    /* 19.07.2011 Трунов - добавлен статус "Тех. отчет" ('10')*/
+    /* 11.04.2012 Трунов - исправлен статус "закрыт" ('07') - все этапы аанулированы после отгрузки (Плоткина)*/
+    /* 12.09.2016 Трунов - исправлен статус "Тех. отчет" ('10') - добавлена работа "Изготовление копий ТО" (kind = 926) */
+    /* 24.04.2019 Трунов - исправлен статус "Просрочен","Тех. отчет" ('06','10') - добавлена работа "Составление программы изысканий" (kind = 785) */
+  
+    cursor c_order(o_id number) is
+      select id, no, open_date, duty_date, cancel_date, ent_id, done_doc_date, done_doc_n, kind, creator, e_date, done_doc_type, arb_id
+      from ppo_orders o left join (select ord_id, max(id) arb_id from ppo_delay where delay = '1' and s_date is not null and e_date is null group by ord_id) a on a.ord_id = o.id
+      where id = o_id;
+  
+    cursor c_ed (o_id in number) is
+      select max(f.e_date) from (
+        select nvl(s.accel_per, s.e_date) e_date from ppo_voldates s where s.ord_id = o_id
+        union
+        select nvl(s.accel_per, s.e_date) e_date from ppo_voldates w, ppo_voldates s where w.ord_id = o_id and s.voldate_id = w.id
+      ) f;
+  
+    -- trunc, чтобы просрочен был на следующий день после срока окончания
+    current_day constant date := trunc(sysdate);
+    stage varchar2(2) := '00';
+    x1 pls_integer := 0;
+    x2 pls_integer := 0;
+    max_ed date;
+    r_order c_order%rowtype;
+    v number;
+    cnt number;
+    cnt_stg number;
+    cnt_wrk number;
+  begin
+    -- для только созданного заказа возвращаем статус "новый"
+    if o_id is null then return '00'; end if;
+  
+    open c_order(o_id);
+    fetch c_order into r_order;
+    close c_order;
+  
+    -- Проверка арбитража
+    if r_order.arb_id is not null then return '09'; end if;
+  
+    -- аннулирован?
+    if r_order.cancel_date is not null then return '08'; end if;
+  
+    -- закрыт?
+    if (r_order.done_doc_date is not null and r_order.done_doc_n is not null)
+    or r_order.done_doc_type = '5' /* заказ закрыт реестром */
+    then
+      return '07';
+    end if;
+  
+    select sum(w.value) + sum(nvl(w.value_fact,0)) into v from ppo_voldates w where w.ord_id = o_id;
+  
+    if r_order.ent_id is not null then
+      stage := '01';
+      -- осмечен, если деньги в работе/этапе > 0
+      if v > 0 then stage := '02'; end if;
+      if r_order.duty_date is not null then stage := '03'; end if;
+    end if;
+  
+    if v is not null then
+      -- Проверяем, все ли этапы имеют дату фактического окончания
+      select count(w.id) into x1 from ppo_voldates w where w.ord_id = o_id and w.is_done != 'Y';
+  
+      if x1 = 0 then
+        stage := '05';
+      else
+        -- Проверяем, все ли этапы имеют дату фактического окончания
+        -- кроме работ "Составление технического отчета", "Составление программы изысканий"
+        select count(w.id) into x1 from ppo_voldates w where w.ord_id = o_id and w.is_done != 'Y' and nvl(kind,'0') not in ('371','926','785');
+        if x1 > 0 then
+          select count(w.e_date_fact) into x2 from ppo_voldates w where w.ord_id = o_id and nvl(kind,'0') not in ('371','926','785');
+          -- Получаем максимальную дату окончания этапов всего заказа кроме работ "Составление технического отчета", "Составление программы изысканий"
+          -- и считаем это датой окончания заказа
+          open c_ed(o_id); fetch c_ed into max_ed; close c_ed;
+          if max_ed < current_day then stage := '06';
+          elsif x2 > 0 then stage := '04';
+          end if;
+        else
+          stage := '10';
+        end if;
+      end if;
+    else
+      return stage;
+    end if;
+  
+    -- количество незакрытых этапов
+    select count(s.id) into cnt
+    from ppo_voldates w join ppo_voldates s on s.voldate_id = w.id
+    where w.ord_id = o_id and (s.acc_no is null or s.acc_date is null) and s.cancelled = 'N';
+  
+    -- количество этапов
+    select count(s.id) into cnt_stg
+    from ppo_voldates w join ppo_voldates s on s.voldate_id = w.id
+    where w.ord_id = o_id and s.cancelled = 'N';
+  
+    -- количество незакрытых работ
+    select count(w.id) into cnt_wrk from ppo_voldates w where w.ord_id = o_id and e_date_fact is null;
+  
+    -- количество НЕаннулированных этапов ----------!!!!!!!!
+    select count(s.id) into x1
+    from ppo_voldates w join ppo_voldates s on s.voldate_id = w.id
+    where w.ord_id = o_id and s.cancelled != 'Y';
+  
+    -- количество закрытых аннулированных этапов
+    select count(s.id) into x2
+    from ppo_voldates w join ppo_voldates s on s.voldate_id = w.id
+    where w.ord_id = o_id and s.acc_no is not null and s.acc_date is not null and s.cancelled = 'Y';
+  
+    if (cnt = 0 and cnt_stg != 0 and cnt_wrk = 0) or (x1 = 0 and x2 != 0) then
+      stage := '07';
+    end if;
+  
+    return stage;
+  end getorderstage;
