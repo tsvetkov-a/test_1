@@ -1,105 +1,307 @@
-function getorderstage(o_id in number) return varchar2 is
-  /* Возвращает стадию обработки заказа */
-  /* 04.06.2008 Трунов - исправлен статус "осмечен" ('02')*/
-  /* 19.07.2011 Трунов - добавлен статус "Тех. отчет" ('10')*/
-  /* 11.04.2012 Трунов - исправлен статус "закрыт" ('07') - все этапы аанулированы после отгрузки (Плоткина)*/
-  /* 12.09.2016 Трунов - исправлен статус "Тех. отчет" ('10') - добавлена работа "Изготовление копий ТО" (kind = 926) */
-  /* 24.04.2019 Трунов - исправлен статус "Просрочен","Тех. отчет" ('06','10') - добавлена работа "Составление программы изысканий" (kind = 785) */
 
-  -- Курсор для получения информации о заказе
-  cursor c_order(o_id number) is
-    select id, no, open_date, duty_date, cancel_date, ent_id, done_doc_date, done_doc_n, kind, creator, e_date, done_doc_type, arb_id
-    from ppo_orders o left join (select ord_id, max(id) arb_id from ppo_delay where delay = '1' and s_date is not null and e_date is null group by ord_id) a on a.ord_id = o.id
-    where id = o_id;
-
-  -- Курсор для получения максимальной даты окончания этапов заказа
-  cursor c_ed (o_id in number) is
-    select max(f.e_date) from (
-      select nvl(s.accel_per, s.e_date) e_date from ppo_voldates s where s.ord_id = o_id
-      union
-      select nvl(s.accel_per, s.e_date) e_date from ppo_voldates w, ppo_voldates s where w.ord_id = o_id and s.voldate_id = w.id
-    ) f;
-
-  -- Объявление переменных
-  current_day constant date := trunc(sysdate); -- Текущая дата
-  stage varchar2(2) := '00'; -- Стадия заказа
-  x1 pls_integer := 0; -- Вспомогательная переменная 1
-  x2 pls_integer := 0; -- Вспомогательная переменная 2
-  max_ed date; -- Максимальная дата окончания этапов заказа
-  r_order c_order%rowtype; -- Строка результата курсора c_order
-  v number; -- Сумма значений value и value_fact для всех этапов заказа
-  cnt number; -- Количество незакрытых этапов заказа
-  cnt_stg number; -- Количество этапов заказа
-  cnt_wrk number; -- Количество незакрытых работ заказа
-
-begin
-    -- Если заказ не указан, возвращаем статус "новый"
-  if o_id is null then return '00'; end if;
-
-  -- Получаем информацию о заказе
-  open c_order(o_id);
-  fetch c_order into r_order;
-  close c_order;
-
-  -- Проверка арбитража: если есть арбитраж, возвращаем статус '09'
-  if r_order.arb_id is not null then return '09'; end if;
-
-  -- Если заказ аннулирован, возвращаем статус '08'
-  if r_order.cancel_date is not null then return '08'; end if;
-
-  -- Если заказ закрыт, возвращаем статус '07'
-  if (r_order.done_doc_date is not null and r_order.done_doc_n is not null)
-  or r_order.done_doc_type = '5' /* заказ закрыт реестром */
-  then
-    return '07';
-  end if;
-
-  -- Получаем сумму значений value и value_fact для всех этапов заказа
-  select sum(w.value) + sum(nvl(w.value_fact,0)) into v from ppo_voldates w where w.ord_id = o_id;
-
-  -- Определение стадии заказа
-  if r_order.ent_id is not null then
-    stage := '01';
-    -- Осмечен, если деньги в работе/этапе > 0
-    if v > 0 then stage := '02'; end if;
-    if r_order.duty_date is not null then stage := '03'; end if;
-  end if;
-
-  -- Проверяем выполнение этапов заказа
-  if v is not null then
-    -- Проверяем, все ли этапы имеют дату фактического окончания
-    select count(w.id) into x1 from ppo_voldates w where w.ord_id = o_id and w.is_done != 'Y';
-
-    -- Если все этапы выполнены, стадия заказа - '05'
-    if x1 = 0 then
-      stage := '05';
-    else
-      -- Проверяем, все ли этапы имеют дату фактического окончания, кроме работ "Составление технического отчета", "Составление программы изысканий"
-      select count(w.id) into x1 from ppo_voldates w where w.ord_id = o_id and w.is_done != 'Y' and nvl(kind,'0') not in ('371','926','785');
-      if x1 > 0 then
-        select count(w.e_date_fact) into x2 from ppo_voldates w where w.ord_id = o_id and nvl(kind,'0') not in ('371','926','785');
-        -- Получаем максимальную дату окончания этапов всего заказа кроме работ "Составление технического отчета", "Составление программы изысканий"
-        -- и считаем это датой окончания заказа
-        open c_ed(o_id); fetch c_ed into max_ed; close c_ed;
-                if max_ed >= current_day then
-          -- Если максимальная дата окончания этапов еще не наступила, стадия заказа - '04'
-          stage := '04';
-        else
-          -- Если максимальная дата окончания этапов прошла, стадия заказа - '06' (просрочен)
-          stage := '06';
-        end if;
-      else
-        -- Если все этапы, кроме работ "Составление технического отчета", "Составление программы изысканий" выполнены, стадия заказа - '10' (тех. отчет)
-        stage := '10';
-      end if;
-    end if;
-  end if;
-
-  return stage;
-end getorderstage;
-
-
-
-dism.exe /online /enable-feature /featurename:Microsoft-Windows-Subsystem-Linux /all /norestart
+  CREATE TABLE "PPO_ORDERS_2_2" 
+   (	"ID" NUMBER(20,0) NOT NULL ENABLE, 
+	"INSERTED" DATE DEFAULT sysdate NOT NULL ENABLE, 
+	"INSERTED_BY" NUMBER(10,0) NOT NULL ENABLE, 
+	"UPDATED" DATE DEFAULT sysdate, 
+	"UPDATED_BY" NUMBER(10,0), 
+	"STATE" NUMBER(1,0) DEFAULT 0 NOT NULL ENABLE, 
+	"NO" VARCHAR2(255 BYTE) NOT NULL ENABLE, 
+	"PRIORITY" VARCHAR2(2 BYTE), 
+	"FIN_SOURCE" VARCHAR2(2 BYTE), 
+	"OPEN_DATE" DATE NOT NULL ENABLE, 
+	"ISSUE_DATE" DATE, 
+	"RETURN_DATE" DATE, 
+	"ADVANCE_PCNT" NUMBER(5,2) DEFAULT 0 NOT NULL ENABLE, 
+	"ADVANCE" NUMBER(25,2), 
+	"CANCEL_DATE" DATE, 
+	"DUTY_DATE" DATE, 
+	"ENT_ID" NUMBER(20,0), 
+	"REMARK" VARCHAR2(2000 BYTE), 
+	"ENT_SC_ID" NUMBER(20,0), 
+	"ADDRESS" VARCHAR2(2000 BYTE), 
+	"WORK_DAYS" NUMBER(*,0), 
+	"E_DATE" DATE, 
+	"IS_WORKING" VARCHAR2(1 BYTE), 
+	"NOTES" NUMBER(*,0), 
+	"KIND" VARCHAR2(3 BYTE) DEFAULT 'дг' NOT NULL ENABLE, 
+	"DONE_DOC_TYPE" VARCHAR2(2 BYTE), 
+	"DONE_DOC_N" VARCHAR2(255 BYTE), 
+	"DONE_DOC_DATE" DATE, 
+	"ENT_INV_ID" NUMBER(20,0), 
+	"CREATOR" NUMBER(20,0) DEFAULT NULL, 
+	"MANAGING" VARCHAR2(1 BYTE), 
+	"ARB_S_DATE" DATE, 
+	"ARB_E_DATE" DATE, 
+	"IS_BIG" NUMBER(1,0), 
+	"ENT_STD_ID" NUMBER(20,0), 
+	"EXTERNAL_VALUE" NUMBER(25,2), 
+	"K_INFL" NUMBER(10,3), 
+	"CONFIDENT" VARCHAR2(1 BYTE) DEFAULT 'N' NOT NULL ENABLE, 
+	"PERIOD" DATE, 
+	"SCALE" VARCHAR2(1 BYTE), 
+	"MEASURE" VARCHAR2(10 BYTE), 
+	"VOLUME" NUMBER(25,4), 
+	"ENT_REC_ID" NUMBER(20,0), 
+	"ISSUED" VARCHAR2(1 BYTE) DEFAULT 'N', 
+	"SPEC_DATE" DATE, 
+	"SUSP_REASON" NUMBER(2,0), 
+	"ACCEPTOR" VARCHAR2(300 BYTE), 
+	"NDS" VARCHAR2(1 BYTE) DEFAULT 'N' NOT NULL ENABLE, 
+	"POD_SETI" VARCHAR2(1 BYTE) DEFAULT 'N' NOT NULL ENABLE, 
+	"OPS_NO" VARCHAR2(255 BYTE), 
+	"OPS_DATE" DATE, 
+	"CONN_ORDERS" "ADMIN"."VC_LIST" , 
+	"AREA" VARCHAR2(1 BYTE) DEFAULT 'N', 
+	"DOC_FOUND" VARCHAR2(2000 BYTE), 
+	"KOEFF" VARCHAR2(2 BYTE), 
+	"RPG_ID" NUMBER(20,0), 
+	"SUMM_DATE" DATE, 
+	"ACT_PRINT_DATE" DATE, 
+	"GEN_NO" VARCHAR2(255 BYTE), 
+	"PASSING" VARCHAR2(1 BYTE) DEFAULT 'N', 
+	"K_ACCEL" NUMBER(10,6), 
+	"DONE_DOC_UPDATER" NUMBER(20,0), 
+	"ACCOUNT_NO" NUMBER(5,0), 
+	"ORD_ID" NUMBER(20,0), 
+	"ENT_BR_ID" NUMBER(20,0), 
+	"DUTY_NULL" VARCHAR2(1 BYTE) DEFAULT 'N', 
+	"REESTR_NO" NUMBER(3,0), 
+	"FIRST_REMINDER_DATE" DATE, 
+	"SECOND_REMINDER_DATE" DATE, 
+	"REMINDER_REMARK" VARCHAR2(1000 BYTE), 
+	"FIRST_REMINDER_DATE_JUR" DATE, 
+	"SECOND_REMINDER_DATE_JUR" DATE, 
+	"REMINDER_REMARK_JUR" VARCHAR2(1000 BYTE), 
+	"ORDER_TYPE" VARCHAR2(1 BYTE) NOT NULL ENABLE, 
+	"MATERIALS_NOT_GIVE" VARCHAR2(1 BYTE) DEFAULT 'N', 
+	"SUIT_DATE" DATE, 
+	"SUIT_DEBT" NUMBER(25,2), 
+	"SUIT_FINE" NUMBER(25,2), 
+	"SUIT_DUTY" NUMBER(25,2), 
+	"COURT_DATE" DATE, 
+	"COURT_DEBT" NUMBER(25,2), 
+	"COURT_FINE" NUMBER(25,2), 
+	"COURT_DUTY" NUMBER(25,2), 
+	"RETURN_DUTY" NUMBER(25,2), 
+	"SUIT_REMARK" VARCHAR2(2000 BYTE), 
+	"GUARANT_DATE" DATE, 
+	"LOSS" VARCHAR2(1 BYTE) DEFAULT 'N', 
+	"ADVANCE_DAYS" NUMBER(3,0), 
+	"ADVANCE_DATE" DATE, 
+	"AFTERPAY_DAYS" NUMBER(3,0), 
+	"AFTERPAY_DATE" DATE, 
+	"PENALTY_DATE" DATE, 
+	"ACCEPTOR_DATE" DATE, 
+	"GEOF_PASS" VARCHAR2(1 BYTE) DEFAULT 'N', 
+	"MESSAGE_DATE" DATE, 
+	"FAX_DATE" DATE, 
+	"ATT_TERR" VARCHAR2(1 BYTE) DEFAULT 'N', 
+	"REGION" VARCHAR2(1 BYTE) DEFAULT 'N', 
+	"NOT_TAKE_FIN_DOC" VARCHAR2(1 BYTE) DEFAULT 'N', 
+	"URIRO" VARCHAR2(1 BYTE) DEFAULT 'N', 
+	"THREE_DIM" VARCHAR2(1 BYTE) DEFAULT 'N', 
+	"ISSUE_DATE_PR" DATE, 
+	"RETURN_DATE_PR" DATE, 
+	"OFERTA" VARCHAR2(1 BYTE) DEFAULT 'N', 
+	"URL" VARCHAR2(2000 BYTE), 
+	"ARC_FOLDER" VARCHAR2(500 BYTE), 
+	"IS_WEB" VARCHAR2(1 BYTE), 
+	"GPZU_NO" VARCHAR2(255 BYTE), 
+	"GPZU_DATE" DATE, 
+	"DEBT_RES" VARCHAR2(1 BYTE), 
+	"TROITSK" VARCHAR2(1 BYTE) DEFAULT 'N', 
+	"ESCR_ID" NUMBER, 
+	"KOD_O6" NUMBER(6,0), 
+	"INVC_ID" NUMBER(20,0), 
+	"EXPERTISE" VARCHAR2(1 BYTE), 
+	"GEON" VARCHAR2(1 BYTE), 
+	"S_BUILD" VARCHAR2(2 BYTE), 
+	"DATE_FORM_DOG" DATE, 
+	"SPS" VARCHAR2(1 BYTE) DEFAULT 'N' NOT NULL ENABLE, 
+	"NOTICE" VARCHAR2(20 BYTE), 
+	"GPZU_MKA_DATE" DATE, 
+	"DUTY_DATE_NULL" DATE, 
+	"GOS" VARCHAR2(1 BYTE), 
+	"XML_ATTRIB" "SYS"."XMLTYPE" , 
+	"NUM_HOLES" NUMBER(20,0), 
+	"SUM_H" NUMBER, 
+	"IN_DOC" VARCHAR2(1 BYTE), 
+	"MKA_NO" VARCHAR2(20 BYTE), 
+	"MPGY_NO" VARCHAR2(500 BYTE), 
+	"NETLESS" VARCHAR2(1 BYTE), 
+	"TYPE_SECURITY" VARCHAR2(2 BYTE), 
+	"SCALE_SECURITY" NUMBER(25,2), 
+	"BASIS" VARCHAR2(3 BYTE), 
+	"SECURITY_DATE" DATE, 
+	"DONE_RETURN_DATE" DATE, 
+	"ACCEPTOR_RETURN_DATE" DATE, 
+	"MKA_DATE" DATE, 
+	"VOLUME_END" VARCHAR2(1 BYTE), 
+	"DECL_STATUS" VARCHAR2(1 BYTE), 
+	"ORDERING_DELAY" VARCHAR2(4000 BYTE), 
+	"RPR_ID" NUMBER(20,0), 
+	"MKA_REESTR_DATE" DATE, 
+	"SCHEME_DATE" DATE, 
+	"TECH_REP_CNT" NUMBER(2,0), 
+	"IS_REG" VARCHAR2(1 BYTE) DEFAULT 'N', 
+	"MKA_REQUEST_NO" VARCHAR2(100 BYTE), 
+	"MKA_REQUEST_DATE" DATE, 
+	"GUID" VARCHAR2(36 BYTE), 
+	"SCHEME_RETURN_DATE" DATE, 
+	"WEB_SHIPMENT" VARCHAR2(1 BYTE), 
+	"CATEGORY" VARCHAR2(1 BYTE), 
+	"ESCR_WP_ID" NUMBER(20,0), 
+	"EDO" VARCHAR2(1 BYTE) DEFAULT NULL, 
+	"CONFIDENT_BASE" VARCHAR2(1 BYTE));
+    
+    COMMENT ON COLUMN "PPO_ORDERS_2"."ID" IS 'Внутренний идентификатор';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."INSERTED" IS 'Дата внесения записи';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."INSERTED_BY" IS 'Код пользователя, внесшего запись';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."UPDATED" IS 'Дата последнего изменения';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."UPDATED_BY" IS 'Код пользователя, изменившего запись';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."STATE" IS 'Тип состояния записи';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."NO" IS '№ заказа';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."PRIORITY" IS 'Приоритеты';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."FIN_SOURCE" IS 'Источник финансирования';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."OPEN_DATE" IS 'Дата открытия заказа';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."ISSUE_DATE" IS 'Дата выдачи заказа';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."RETURN_DATE" IS 'Дата возврата заказа';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."ADVANCE_PCNT" IS 'Процент аванса';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."ADVANCE" IS 'Аванс';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."CANCEL_DATE" IS 'Дата аннулирования';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."DUTY_DATE" IS 'Дата наряда';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."ENT_ID" IS 'ID заказчика';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."REMARK" IS 'Комментарий';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."ENT_SC_ID" IS 'ID субподрядчика';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."ADDRESS" IS 'Адрес заказа';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."WORK_DAYS" IS 'Количество дней';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."E_DATE" IS 'Дата окончания факт';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."IS_WORKING" IS 'Рабочие дни ?';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."NOTES" IS 'Городские программы';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."KIND" IS 'Тип документа - соглашения';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."DONE_DOC_TYPE" IS 'Тип документа на закрытие';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."DONE_DOC_N" IS '№ документа на закрытие';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."DONE_DOC_DATE" IS 'Дата документа на закрытие';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."ENT_INV_ID" IS 'ID инвестора';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."CREATOR" IS 'Исполнитель заказа';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."MANAGING" IS 'Диспетчеризация';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."ARB_S_DATE" IS 'Дата начала арбитража';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."ARB_E_DATE" IS 'Дата окончания арбитража';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."IS_BIG" IS 'Признак "большого" заказа';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."ENT_STD_ID" IS 'ID проектировщика';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."EXTERNAL_VALUE" IS 'Стоимость работы сторонней организации с НДС';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."K_INFL" IS 'Коэффициент инфляции заказчика';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."CONFIDENT" IS 'Заказ режимный?';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."PERIOD" IS 'Срок действия разрешения';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."SCALE" IS 'Масштаб изысканий';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."MEASURE" IS 'Единица измерения';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."VOLUME" IS 'Объем работ';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."ENT_REC_ID" IS 'ID грузополучателя';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."ISSUED" IS 'Разрешение Геонадзором выдано?';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."SPEC_DATE" IS 'Дата передачи ТЗ';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."SUSP_REASON" IS 'Причина закрытия заказа';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."ACCEPTOR" IS 'Материалы выданы';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."NDS" IS 'Обозначение без НДС';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."POD_SETI" IS 'Обозначение под сети';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."OPS_NO" IS 'Номер заключения ОПС';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."OPS_DATE" IS 'Дата заключения ОПС';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."CONN_ORDERS" IS 'Связанные заказы';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."AREA" IS 'Признак наличия участка в графике по заказам, привязанным к АС "Документ"';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."DOC_FOUND" IS 'Документ-основание';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."KOEFF" IS 'Коэффициент по заказу';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."SUMM_DATE" IS 'Дата сводки';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."ACT_PRINT_DATE" IS 'Дата печати акта';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."GEN_NO" IS 'Номер генерального договора';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."PASSING" IS 'Передача в геонадзор';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."K_ACCEL" IS 'Коэффициент "ускорения"';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."DONE_DOC_UPDATER" IS 'ID сотрудника, обновившего DONE_DOC_N';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."ACCOUNT_NO" IS 'Номер счета';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."ORD_ID" IS 'ID гензаказа';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."ENT_BR_ID" IS 'ID филиала';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."DUTY_NULL" IS 'Нулевой наряд';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."REESTR_NO" IS 'Номер реестра';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."FIRST_REMINDER_DATE" IS 'Дата первого напоминания';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."SECOND_REMINDER_DATE" IS 'Дата второго напоминания';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."REMINDER_REMARK" IS 'Дебиторка примечание';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."FIRST_REMINDER_DATE_JUR" IS 'Дата первого напоминания (юрист)';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."SECOND_REMINDER_DATE_JUR" IS 'Дата второго напоминания (юрист)';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."REMINDER_REMARK_JUR" IS 'Дебиторка примечание (юрист)';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."ORDER_TYPE" IS 'Тип заказа (основной, субподряд)';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."MATERIALS_NOT_GIVE" IS 'Материалы не выдавать?';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."SUIT_DATE" IS 'Дата подачи иска';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."SUIT_DEBT" IS 'Основной долг';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."SUIT_FINE" IS 'Штрафные санкции';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."SUIT_DUTY" IS 'Госпошлина';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."COURT_DATE" IS 'Дата судебного решения';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."COURT_DEBT" IS 'Основной долг (решение суда)';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."COURT_FINE" IS 'Штрафные санкции (решение суда)';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."COURT_DUTY" IS 'Госпошлина (решение суда)';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."RETURN_DUTY" IS 'Возвратная часть госпошлины';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."SUIT_REMARK" IS 'Примечание по иску';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."GUARANT_DATE" IS 'Гарантия оплаты до';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."LOSS" IS 'В убыток';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."ADVANCE_DAYS" IS 'Кол-во р.д. по договору - для аванса';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."ADVANCE_DATE" IS 'Срок оплаты - для аванса';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."AFTERPAY_DAYS" IS 'Кол-во р.д. по договору - для доплаты';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."AFTERPAY_DATE" IS 'Срок оплаты - для доплаты';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."PENALTY_DATE" IS 'Дата расчета неустойки';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."ACCEPTOR_DATE" IS 'Дата накладной';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."GEOF_PASS" IS 'Не передано в геофонд?';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."MESSAGE_DATE" IS 'Дата сообщения о готовности';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."FAX_DATE" IS 'Дата факсограммы';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."ATT_TERR" IS 'Присоединенная территория';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."REGION" IS 'Область';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."NOT_TAKE_FIN_DOC" IS 'Заказчик не забирает финансовые документы';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."URIRO" IS 'УРиРО';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."THREE_DIM" IS 'Трехмерка';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."ISSUE_DATE_PR" IS 'Дата выдачи программы заказчику';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."RETURN_DATE_PR" IS 'Дата возврата программы заказчиком';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."OFERTA" IS 'Признак электронной регистрации';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."URL" IS 'Ссылка на описание оферты';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."ARC_FOLDER" IS 'Имя папки для хранения в Архиве';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."IS_WEB" IS 'Заказ через сайт?';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."GPZU_NO" IS 'Номер градостроительного плана земельного участка';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."GPZU_DATE" IS 'Дата градостроительного плана земельного участка';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."DEBT_RES" IS 'Резерв ДЗ';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."TROITSK" IS 'г.Троицк?';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."ESCR_ID" IS 'ID представителя заказчика';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."KOD_O6" IS 'Уникальный код для заказов 6\';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."EXPERTISE" IS 'для Главгосэкспертизы';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."GEON" IS 'Результаты изысканий в эл. форме';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."S_BUILD" IS 'Самострой';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."DATE_FORM_DOG" IS 'Дата формирования договора';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."SPS" IS '277-ПП';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."NOTICE" IS 'Способ уведомления';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."GPZU_MKA_DATE" IS 'Дата заявки МКА';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."DUTY_DATE_NULL" IS 'Дата нулевого наряда';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."GOS" IS 'Государственный?';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."XML_ATTRIB" IS 'Атрибуты заказа, помещенные в XML';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."NUM_HOLES" IS 'Количество скважин в контуре';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."SUM_H" IS 'Суммарная глубина скважин';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."IN_DOC" IS 'Вывод в выходные документы';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."MKA_NO" IS 'Номер МКА';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."MPGY_NO" IS 'Внешний номер';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."NETLESS" IS 'Без сетей';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."TYPE_SECURITY" IS 'вид фин.обеспечения, домен «ВИД ОБЕСПЕЧЕНИЯ»';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."SCALE_SECURITY" IS 'размер фин.обеспечения';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."DONE_RETURN_DATE" IS 'Дата возврата акта';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."ACCEPTOR_RETURN_DATE" IS 'Дата возврата накладной';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."MKA_DATE" IS 'Дата МКА (Номер МКА)';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."DECL_STATUS" IS 'Статус заявителя';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."MKA_REESTR_DATE" IS 'Дата реестра МКА';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."SCHEME_DATE" IS 'Дата формирования схемы границ заказа';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."TECH_REP_CNT" IS 'количество экземпляров тех.отчета';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."IS_REG" IS 'Признак регистрации заказа';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."MKA_REQUEST_NO" IS 'Номер поручения МКА';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."MKA_REQUEST_DATE" IS 'Дата поручения МКА';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."GUID" IS 'GUID заказа';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."SCHEME_RETURN_DATE" IS 'Дата возврата подписанной схемы из МКА';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."WEB_SHIPMENT" IS 'Отгрузка материалов на сайт';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."CATEGORY" IS 'Категория работ';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."ESCR_WP_ID" IS 'Поле хранения согласующего ПР для сайта';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."EDO" IS 'ЭДО';
+   COMMENT ON COLUMN "PPO_ORDERS_2"."CONFIDENT_BASE" IS 'Основание секретности';
+   COMMENT ON TABLE "PPO_ORDERS_2"  IS 'Основные параметры заказа';
 
     
