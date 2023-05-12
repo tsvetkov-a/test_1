@@ -1,14 +1,55 @@
-select  x.*
-        from iyastrebov.xml_labels m
-        , xmltable(xmlnamespaces('http://asguf.mos.ru/rkis_gu/coordinate/v6_1/' as "ns1", 'http://mos.ru/pgu/ru/application/mggt/086202/' as "ns5")
-          , '/ns1:CoordinateMessage[1]/ns1:CoordinateDataMessage[1]/ns1:SignService[1]/ns1:CustomAttributes/ns1:underground_facilitieslist[1]/ns1:underground_facilities/'
-            passing m.msg columns
-              ServiceProperties xmltype path 'ns5:ServiceProperties'
-            , namepoint object varchar2(255) path 'ns5:namepoint object'
-            , wayofwork ..... path 'ns5:wayofwork'
-            , basementdepth ..... path 'ns5:basementdepth'
-            , numberofpoint ..... path 'ns5:numberofpoint'
-            , event ...... path 'ns5:event'
-            , overground varchar2(10) path 'ns5:overground'
-            , underground varchar2(10) path 'ns5:underground'
-          ) x;
+procedure notification_admission(o_id number, inf varchar2) is
+  begin
+    for admission in (
+    select xmlelement("TABLE", xmlforest(
+             xmlforest('{ord_no}' as "TD", o.no as "TD") as "TR"
+           , xmlforest('{information}' as "TD", inf as "TD") as "TR"
+         , xmlforest('{RECIPIENT}' as "TD", listagg(re.admin_name||'@mggt.ru', ',') within group (order by re.shortname) as "TD") as "TR" --ответственные исполнители операции «Проверка результатов съемки»
+           )) x
+     from ppo_orders o join vw_ord_prd p on p.ord_id = o.id join ref_employees re on re.id = p.re_id where p.name_id = '274' and p.re_id not in (202133, 201819)
+     and o.id = o_id
+     group by o.no
+      ) loop
+        ref_mail.send('Информация о допуске по заказу', admission.x);
+       end loop;
+  end notification_admission;
+
+
+Необходимо сделать два вида рассылок: для УГП №1 и УГП №2
+
+Рассылки для УГП №1: делаем проверку на заказах у которых следующие условия:
+есть работа “Создание инженерно-топографического плана М 1:500 для первичной паспортизации” ppo_voldates.kind = '1127' + есть работа у которой ppo_voldates.executor = 1293763
+
+ppo_orders.done_doc_date is null
+
+ppo_orders.no not like '%test%', '%тест%' без учёта регистра.
+
+Письмо уходит следующим сотрудникам УГП1:
+
+Беленко Геннадий Игоревич <gbelenko@mggt.ru>;
+Воронова Ольга Алексеевна <ovoronova@mggt.ru>
+
+
+2. Рассылки для УГП №1: делаем проверку на заказах у которых следующие условия:
+
+есть работа “Создание инженерно-топографического плана М 1:500 для первичной паспортизации” ppo_voldates.kind = '1127' + есть работа у которой ppo_voldates.executor = 1293890
+
+ppo_orders.done_doc_date is null
+
+ppo_orders.no not like '%test%', '%тест%' без учёта регистра.
+
+Письмо уходит следующим сотрудникам УГП2:
+
+Хомяков Павел Викторович <pkhomyakov@mggt.ru>;
+Котельников Михаил Вадимович <mkotelnikov@MGGT.RU>;
+
+
+1ая рассылка: появилась дата аннулирования: при появлении даты аннулирования в таком заказе ppo_orders.cancel_date is not null (update с null на not null), уходит сообщение:
+
+"В заказе ppo_orders.no проставили дату аннулирования ppo_orders.cancel_date"
+
+Наименование рассылок в домене: 
+
+Заказ аннулирован (УГП №1)
+
+Заказ аннулирован (УГП №2)
