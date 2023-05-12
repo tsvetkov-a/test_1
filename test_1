@@ -1,42 +1,20 @@
-
-
-Характеристика задачи:  REQDEV-368 - Автоинформирование при изменениях в АС Договор В РАБОТЕ  для оперативного контроля заказов по ОГХ, необходимо сделать рассылку при появлении даты аннулирования и при изменении даты плана в работе “Создание инженерно-топографического плана М 1:500 для первичной паспортизации.”
-Входные данные: в заказе есть работа “Создание инженерно-топографического плана М 1:500 для первичной паспортизации.” (ppo_voldates.kind = 1127)
-Выходные данные: сообщение об аннулировании заказа, сообщение об изменении даты плана в работе
-Описание алгоритма:
-
-Необходимо сделать рассылку для УГП №1
-
-Рассылки для УГП №1: делаем проверку на заказах у которых следующие условия:
-есть работа “Создание инженерно-топографического плана М 1:500 для первичной паспортизации” ppo_voldates.kind = '1127' + есть работа у которой ppo_voldates.executor = 1293763
-
-ppo_orders.done_doc_date is null
-
-ppo_orders.no not like '%test%', '%тест%' без учёта регистра.
-
-Письмо уходит следующим сотрудникам УГП1:
-
-Беленко Геннадий Игоревич <gbelenko@mggt.ru>;
-Воронова Ольга Алексеевна <ovoronova@mggt.ru>
-
-
-1ая рассылка: появилась дата аннулирования: при появлении даты аннулирования в таком заказе ppo_orders.cancel_date is not null (update с null на not null), уходит сообщение:
-
-"В заказе ppo_orders.no проставили дату аннулирования ppo_orders.cancel_date"
-
-
-procedure notification_admission(o_id number, inf varchar2) is
+  procedure test_1(o.id number) is
   begin
-    for admission in (
+    for change in (
     select xmlelement("TABLE", xmlforest(
              xmlforest('{ord_no}' as "TD", o.no as "TD") as "TR"
-           , xmlforest('{cancel_date}' as "TD", o.cancel_date as "TD") as "TR"
-         , xmlforest('{RECIPIENT}' as "TD", listagg(re.admin_name||'@mggt.ru', ',') within group (order by re.shortname) as "TD") as "TR" --ответственные исполнители операции «Проверка результатов съемки»
+           , xmlforest('{canlec_date}' as "TD", o.cancel_date as "TD") as "TR"
            )) x
-     from ppo_orders o join vw_ord_prd p on p.ord_id = o.id join ref_employees re on re.id = p.re_id where p.name_id = '274' and p.re_id not in (202133, 201819)
+     from ppo_orders o join w ppo_voldates on w.ord_id = o.id
+     where w.kind = '1127'
+     and w.executor = 12937663
+     and o.done_doc_date is null
+     and upper(o.no) not like '%test%'
+     and upper(o.no) not like '%тест%'
      and o.id = o_id
      group by o.no
       ) loop
-        ref_mail.send('Информация о допуске по заказу', admission.x);
+        ref_mail.send('В заказе ppo_orders.no проставили дату аннулирования ppo_orders.cancel_date', change.x,
+        'gbelenko@mggt.ru, ovoronova@mggt.ru');
        end loop;
-  end notification_admission;
+  end test_1;
