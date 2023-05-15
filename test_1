@@ -1,74 +1,23 @@
-Характеристика задачи:  REQDEV-368 - Автоинформирование при изменениях в АС Договор В РАБОТЕ  для оперативного контроля заказов по ОГХ, необходимо сделать рассылку при появлении даты аннулирования и при изменении даты плана в работе “Создание инженерно-топографического плана М 1:500 для первичной паспортизации.”
-Входные данные: в заказе есть работа “Создание инженерно-топографического плана М 1:500 для первичной паспортизации.” (ppo_voldates.kind = 1127)
-Выходные данные: сообщение об аннулировании заказа, сообщение об изменении даты плана в работе
-Описание алгоритма:
-Необходимо сделать два вида рассылок: для УГП №1 и УГП №2
-
-Рассылки для УГП №1: делаем проверку на заказах у которых следующие условия:
-есть работа “Создание инженерно-топографического плана М 1:500 для первичной паспортизации” ppo_voldates.kind = '1127' + есть работа у которой ppo_voldates.executor = 1293763
-
-ppo_orders.done_doc_date is null
-
-ppo_orders.no not like '%test%', '%тест%' без учёта регистра.
-
-Письмо уходит следующим сотрудникам УГП1:
-
-Беленко Геннадий Игоревич <gbelenko@mggt.ru>;
-Воронова Ольга Алексеевна <ovoronova@mggt.ru>
-
-
-2. Рассылки для УГП №1: делаем проверку на заказах у которых следующие условия:
-
-есть работа “Создание инженерно-топографического плана М 1:500 для первичной паспортизации” ppo_voldates.kind = '1127' + есть работа у которой ppo_voldates.executor = 1293890
-
-ppo_orders.done_doc_date is null
-
-ppo_orders.no not like '%test%', '%тест%' без учёта регистра.
-
-Письмо уходит следующим сотрудникам УГП2:
-
-Хомяков Павел Викторович <pkhomyakov@mggt.ru>;
-Котельников Михаил Вадимович <mkotelnikov@MGGT.RU>;
-
-
-1ая рассылка: появилась дата аннулирования: при появлении даты аннулирования в таком заказе ppo_orders.cancel_date is not null (update с null на not null), уходит сообщение:
-
-"В заказе ppo_orders.no проставили дату аннулирования ppo_orders.cancel_date"
-
-Наименование рассылок в домене: 
-
-Заказ аннулирован (УГП №1)
-
-Заказ аннулирован (УГП №2)
-
-
-procedure test_1(o_id number) is
-  begin
-    for change in (
+procedure test_2(o_id number) is
+begin
+  for change in (
     select executor, xmlelement("TABLE", xmlforest(
-             xmlforest('{ord_no}' as "TD", o.no as "TD") as "TR"
-           , xmlforest('{cancel_date}' as "TD", o.cancel_date as "TD") as "TR"
-           )) x
-     from ppo_orders o join ppo_voldates w on w.ord_id = o.id
-     where w.kind = '1127'
-     and o.done_doc_date is null
-     and upper(o.no) not like '%test%'
-     and upper(o.no) not like '%тест%'
-     and o.id = o_id
-      ) loop
-        if executor = 129376 THEN
-        ref_mail.send('Заказ аннулирован (УГП №1)', change.x);
-        elsif executor = 1293890 THEN
-        ref_mail.send('Заказ аннулирован (УГП №2)', change.x);
-       end loop;
-
-
-2ая рассылка: в работе, у которой ppo_voldates.kind = '1127' изменилась дата планового окончания ppo_voldates.e_date (update с not null на новое значение, не равное предыдущему)
-
-"В заказе ppo_orders.no поменялась дата планового окончания на ppo_voldates.e_date (новая дата)"
-
-Наименование рассылок в домене:
-
-Изменение даты плана в заказах ОГХ (УГП №1)
-
-Изменение даты плана в заказах ОГХ (УГП №2)
+      xmlforest('{ord_no}' as "TD", o.no as "TD") as "TR",
+      xmlforest('{e_date}' as "TD", w.e_date as "TD") as "TR"
+    )) x
+    from ppo_orders o join ppo_voldates w on w.ord_id = o.id
+    where w.kind = '1127'
+    and o.done_doc_date is null
+    and upper(o.no) not like '%test%'
+    and upper(o.no) not like '%тест%'
+    and w.e_date is not null -- Условие для проверки изменения даты планового окончания
+    and w.e_date <> (select e_date from ppo_voldates where ord_id = o.id and kind = '1127') -- Условие для проверки новой даты
+    and o.id = o_id
+  ) loop
+    if executor = 129376 THEN
+      ref_mail.send('Изменение даты плана в заказах ОГХ (УГП №1)', change.x);
+    elsif executor = 1293890 THEN
+      ref_mail.send('Изменение даты плана в заказах ОГХ (УГП №2)', change.x);
+    end if;
+  end loop;
+end test_2;
