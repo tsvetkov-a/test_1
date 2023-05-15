@@ -1,3 +1,69 @@
+trigger vd_msg
+for insert or update
+on ppo_voldates
+referencing new as new old as old
+compound trigger
+
+ type t_vld_changes is table of ppo_voldates%rowtype index by simple_integer;
+ vld_new t_vld_changes;
+ vld_old t_vld_changes;
+ v_index simple_integer := 0;
+  procedure msg is
+    o_id number;
+    v_updates constant simple_integer := vld_new.count();
+    cnt number;
+  begin
+    for i IN 1..v_updates loop
+      if vld_old(i).e_date_fact is null and vld_new(i).e_date_fact is not null then
+        if vld_new(i).kind = 'кп' and vld_new(i).category = '352' then
+          ppo_msg.dep4_commercial_vld(vld_new(v_index).executor, vld_new(v_index).ord_id, vld_new(v_index).id);
+        end if;
+      end if;
+    end loop;
+   vld_new.delete();
+   v_index := 0; --resetting threshold for next bulk-insert.
+  end msg;
+/*####################################################################################################################*/
+
+  before statement is begin
+    if not ppo_msg.vld_latch then
+      ppo_msg.t_vld_ins_id.delete();
+    end if;
+  end before statement;
+
+/*####################################################################################################################*/
+
+  after each row is begin
+
+    v_index                      := v_index + 1;
+   
+    vld_new(v_index).id          :=:new.id;
+    vld_new(v_index).ord_id      :=:new.ord_id;
+    vld_new(v_index).executor    :=:new.executor;
+    vld_new(v_index).e_date_fact :=:new.e_date_fact;
+    vld_new(v_index).kind        :=:new.kind;
+    vld_new(v_index).category    :=:new.category;
+   
+    vld_old(v_index).e_date_fact :=:old.e_date_fact;
+   
+    if inserting and :new.id is not null then
+      ppo_msg.t_vld_ins_id(:new.id) := :new.id;
+    end if;
+  end after each row;
+
+/*####################################################################################################################*/
+
+  after statement is begin
+    if not ppo_msg.vld_latch then
+      ppo_msg.vld;
+    end if;
+    msg();
+  end after statement;
+
+/*####################################################################################################################*/
+end vd_msg;
+
+
 procedure test_2(o_id number) is
 begin
   for change in (
@@ -21,18 +87,3 @@ begin
     end if;
   end loop;
 end test_2;
-
-
-
-
-if vld_old(i).e_date_fact is null and vld_new(i).e_date_fact is not null then
-        if vld_new(i).kind = 'кп' and vld_new(i).category = '352' then
-          ppo_msg.dep4_commercial_vld(vld_new(v_index).executor, vld_new(v_index).ord_id, vld_new(v_index).id);
-        end if;
-      end if;
-
-
-and w.e_date is not null -- Условие для проверки изменения даты планового окончания
-    and w.e_date <> (select e_date from ppo_voldates where ord_id = o.id and kind = '1127') -- Условие для проверки новой даты
-
-
