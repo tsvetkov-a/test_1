@@ -21,3 +21,18 @@ begin
     end if;
   end loop;
 end test_2;
+
+
+
+
+if vld_old(i).e_date_fact is null and vld_new(i).e_date_fact is not null then
+        if vld_new(i).kind = 'кп' and vld_new(i).category = '352' then
+          ppo_msg.dep4_commercial_vld(vld_new(v_index).executor, vld_new(v_index).ord_id, vld_new(v_index).id);
+        end if;
+      end if;
+
+
+and w.e_date is not null -- Условие для проверки изменения даты планового окончания
+    and w.e_date <> (select e_date from ppo_voldates where ord_id = o.id and kind = '1127') -- Условие для проверки новой даты
+
+
