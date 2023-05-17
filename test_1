@@ -147,6 +147,38 @@ exception
     dbms_output.put_line('Error occurred: ' || SQLCODE || ' : ' || SQLERRM);
 end test_1;
 
+ОБНОВЛЕННАЯ ПРОЦЕДУРА = 2
+
+procedure test_1(o_id number, o_no varchar2, o_cancel_date date) is
+begin
+  for change in (
+    select w.executor, xmlelement("TABLE", xmlforest(
+             xmlforest('{ord_no}' as "TD", o_no as "TD") as "TR"
+           , xmlforest('{cancel_date}' as "TD", o_cancel_date as "TD") as "TR"
+           )) x
+    from ppo_voldates w
+    where exists (
+      select 1
+      from ppo_orders o
+      where o.id = w.ord_id
+      and o.id = o_id
+    )
+    and w.kind = '1127'
+    and w.executor in (1293763, 1293890)
+  ) loop
+    dbms_output.put_line('Processing executor: ' || change.executor);
+    if change.executor = 1293763 then
+        dbms_output.put_line('Sending mail to УГП №1');
+        ref_mail.send('Заказ аннулирован (УГП №1)', change.x);
+    elsif change.executor = 1293890 then
+        dbms_output.put_line('Sending mail to УГП №2');
+        ref_mail.send('Заказ аннулирован (УГП №2)', change.x);
+    end if;
+  end loop;
+exception
+  when others then
+    dbms_output.put_line('Error occurred: ' || SQLCODE || ' : ' || SQLERRM);
+end test_1;
 
 _________________________________________________________________________________________________________________________________________===============================================
 
