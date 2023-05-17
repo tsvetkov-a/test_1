@@ -102,3 +102,48 @@ end test_2;
 
 
 Для cancel_date нужно переписать запрос в ppo_msg – заменить join ppo_voldates на 2 exists, в одном  из которых проверять наличие работы ‘1127’, а в другом ‘executor’.
+
+
+
+procedure test_1(o_id number, o_no varchar2, o_cancel_date date) is
+    executor number; -- Объявление переменной executor
+begin
+  for change in (
+    select executor, xmlelement("TABLE", xmlforest(
+             xmlforest('{ord_no}' as "TD", o_no as "TD") as "TR"
+           , xmlforest('{cancel_date}' as "TD", o_cancel_date as "TD") as "TR"
+           )) x
+    from ppo_voldates w
+    where exists (
+      select 1
+      from ppo_orders o
+      where o.id = w.ord_id
+      and o.done_doc_date is null
+      and upper(o.no) not like '%test%'
+      and upper(o.no) not like '%тест%'
+    )
+    and exists (
+      select 1
+      from ppo_voldates v
+      where v.ord_id = w.ord_id
+      and v.kind = '1127'
+      and v.executor in (129376, 1293890)
+    )
+    and rownum = 1
+  ) loop
+    dbms_output.put_line('Processing executor: ' || executor);
+    if executor = 129376 then
+        dbms_output.put_line('Sending mail to УГП №1');
+        ref_mail.send('gbelenko@mggt.ru', 'Заказ аннулирован (УГП №1)', change.x);
+        ref_mail.send('ovoronova@mggt.ru', 'Заказ аннулирован (УГП №1)', change.x);
+    elsif executor = 1293890 then
+        dbms_output.put_line('Sending mail to УГП №2');
+        ref_mail.send('pkhomyakov@mggt.ru', 'Заказ аннулирован (УГП №2)', change.x);
+        ref_mail.send('mkotelnikov@MGGT.RU', 'Заказ аннулирован (УГП №2)', change.x);
+    end if;
+  end loop;
+exception
+  when others then
+    dbms_output.put_line('Error occurred: ' || SQLCODE || ' : ' || SQLERRM);
+end test_1;
+
