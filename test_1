@@ -52,3 +52,50 @@ ppo_orders.no not like '%test%', '%тест%' без учёта регистра
 Изменение даты плана в заказах ОГХ (УГП №1)
 
 Изменение даты плана в заказах ОГХ (УГП №2)
+
+
+
+  procedure test_1(o_id number, o_no varchar2, o_cancel_date date) is
+    executor number; -- Объявление переменной executor
+begin
+  for change in (
+    select executor, xmlelement("TABLE", xmlforest(
+             xmlforest('{ord_no}' as "TD", o_no as "TD") as "TR"
+           , xmlforest('{cancel_date}' as "TD", o_cancel_date as "TD") as "TR"
+           )) x
+    from ppo_voldates w
+    where w.ord_id = o_id and w.kind = '1127'
+    --and o.done_doc_date is null
+    --and upper(o.no) not like '%test%'
+    --and upper(o.no) not like '%тест%'
+    --and o.id = o_id
+    and rownum = 1
+  ) loop
+    if executor = 129376 then
+        ref_mail.send('Заказ аннулирован (УГП №1)', change.x);
+    elsif executor = 1293890 then
+        ref_mail.send('Заказ аннулирован (УГП №2)', change.x);
+    end if;
+  end loop;      
+end test_1;
+
+    procedure test_2(v_id number) is
+begin
+  for change in (
+    select executor, xmlelement("TABLE", xmlforest(
+      xmlforest('{ord_no}' as "TD", o.no as "TD") as "TR",
+      xmlforest('{e_date}' as "TD", w.e_date as "TD") as "TR"
+    )) x
+    from ppo_orders o join ppo_voldates w on w.ord_id = o.id
+    where w.kind = '1127'
+    and upper(o.no) not like '%test%'
+    and upper(o.no) not like '%тест%'
+    and w.id = v_id
+  ) loop
+    if change.executor = 1293763 THEN
+      ref_mail.send('Изменение даты плана в заказах ОГХ (УГП №1)', change.x);
+    elsif change.executor = 1293890 THEN
+      ref_mail.send('Изменение даты плана в заказах ОГХ (УГП №2)', change.x);
+    end if;
+  end loop;
+end test_2;
