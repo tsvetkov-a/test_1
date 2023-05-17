@@ -99,3 +99,6 @@ begin
     end if;
   end loop;
 end test_2;
+
+
+Для cancel_date нужно переписать запрос в ppo_msg – заменить join ppo_voldates на 2 exists, в одном  из которых проверять наличие работы ‘1127’, а в другом ‘executor’.
