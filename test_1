@@ -134,7 +134,7 @@ begin
     and rownum = 1
   ) loop
     dbms_output.put_line('Processing executor: ' || executor);
-    if executor = 129376 then
+    if executor = 1293763 then
         dbms_output.put_line('Sending mail to УГП №1');
         ref_mail.send('Заказ аннулирован (УГП №1)', change.x);
     elsif executor = 1293890 then
