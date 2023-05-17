@@ -71,7 +71,7 @@ begin
     --and o.id = o_id
     and rownum = 1
   ) loop
-    if executor = 129376 then
+    if executor = 1293763 then
         ref_mail.send('Заказ аннулирован (УГП №1)', change.x);
     elsif executor = 1293890 then
         ref_mail.send('Заказ аннулирован (УГП №2)', change.x);
@@ -104,6 +104,9 @@ end test_2;
 Для cancel_date нужно переписать запрос в ppo_msg – заменить join ppo_voldates на 2 exists, в одном  из которых проверять наличие работы ‘1127’, а в другом ‘executor’.
 Для done_doc_date проблематичнее – ppo_voldates не получится обратиться из триггера. 
 
+
+Обновленная процедура:
+
 procedure test_1(o_id number, o_no varchar2, o_cancel_date date) is
     executor number; -- Объявление переменной executor
 begin
@@ -126,19 +129,17 @@ begin
       from ppo_voldates v
       where v.ord_id = w.ord_id
       and v.kind = '1127'
-      and v.executor in (129376, 1293890)
+      and v.executor in (1293763, 1293890)
     )
     and rownum = 1
   ) loop
     dbms_output.put_line('Processing executor: ' || executor);
     if executor = 129376 then
         dbms_output.put_line('Sending mail to УГП №1');
-        ref_mail.send('gbelenko@mggt.ru', 'Заказ аннулирован (УГП №1)', change.x);
-        ref_mail.send('ovoronova@mggt.ru', 'Заказ аннулирован (УГП №1)', change.x);
+        ref_mail.send('Заказ аннулирован (УГП №1)', change.x);
     elsif executor = 1293890 then
         dbms_output.put_line('Sending mail to УГП №2');
-        ref_mail.send('pkhomyakov@mggt.ru', 'Заказ аннулирован (УГП №2)', change.x);
-        ref_mail.send('mkotelnikov@MGGT.RU', 'Заказ аннулирован (УГП №2)', change.x);
+        ref_mail.send('Заказ аннулирован (УГП №2)', change.x);
     end if;
   end loop;
 exception
@@ -254,3 +255,19 @@ begin
 /*####################################################################################################################*/ 
     
 end pord_msg;
+
+
+
+
+===========================================================================================================================
+Триггер
+70-75 строка:
+/*####################################################################################################################*/
+if nvl(trunc(:old.cancel_date), sysdate) != trunc(:new.cancel_date) and :new.cancel_date is not null and :old.cancel_date is null then
+  ppo_msg.ord_annulment_notification(:new.id, :new.no, :new.inserted_by, :new.escr_id);
+  if :new.done_doc_date is null and upper(:new.no) not like '%test%' and upper(:new.no) not like '%тест%' then
+    ppo_msg.test_1_updated(:new.id, :new.no, :new.cancel_date); -- Используйте обновленное имя процедуры
+  end if;
+end if;
+/*####################################################################################################################*/
+=======================================================================================================================
