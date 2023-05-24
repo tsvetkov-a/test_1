@@ -1,8 +1,1 @@
-  procedure send_mail(m_name varchar2, m_params xmltype := null) as 
-    m_date date := sysdate;
-    sender varchar2(4000);
-    rcp varchar2(4000);
-    m_subj varchar2(4000);
-    m_body clob;
-    att xmltype;
-    err clob;
+отправляет электронные письма с заданными параметрами, включая содержание письма, получателя, отправителя и вложения (при наличии), а также отслеживает возможные ошибки в процессе отправки.
