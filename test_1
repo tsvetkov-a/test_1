@@ -1,11 +1,14 @@
-  function get_subj(m_name varchar2, m_date date, m_params xmltype := null) return varchar2 as
-    sender varchar2(4000);
-    rcp varchar2(4000);
-    m_subj varchar2(4000);
-    m_body clob;
-    att xmltype;
-    err clob;
+  function validate_email(email_list varchar2) return varchar2 is
+    vl varchar2(32000);
+    el varchar2(32000) := replace(email_list, ' ');
+    email_regexp varchar2(500) := chk_regexp; --'[_]{0,1}([A-Z|a-z|0-9](\.|_|-){0,1})+\@([A-Z|a-z|0-9])+(([\.|_|-]){0,1}[A-Z|a-z|0-9])*\.[A-Z|a-z]{2,6}'
+    etest_regexp varchar2(20) := '[^ ,;:]+';
   begin
-    prepare_mail(m_name, m_date, m_params, sender, rcp, m_subj, m_body, att, err);
-    return m_subj;
-  end get_subj;
+    select substr(clobagg(','||ve), 2) into vl from (select distinct ve from (
+      select regexp_substr(el, email_regexp, 1, level) ve, regexp_substr(el, etest_regexp, 1, level) vt
+      from dual
+      connect by level <= regexp_count(el, email_regexp)
+    ) where ve = vt);
+    return vl;
+  end;
+  
