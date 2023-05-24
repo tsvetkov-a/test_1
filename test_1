@@ -1,16 +1,34 @@
-  function validate_email(email_list varchar2) return varchar2 is
-    vl varchar2(32000);
-    el varchar2(32000) := replace(email_list, ' ');
-    email_regexp varchar2(500) := chk_regexp; --'[_]{0,1}([A-Z|a-z|0-9](\.|_|-){0,1})+\@([A-Z|a-z|0-9])+(([\.|_|-]){0,1}[A-Z|a-z|0-9])*\.[A-Z|a-z]{2,6}'
-    etest_regexp varchar2(20) := '[^ ,;:]+';
+    procedure send_error(err clob) is
+      t clob;
+      emails varchar2(4000);
+--      emails_default constant varchar2(200) := 'ekryukov@t80.mggt,artem@iitp.mggt,vtrunov@iitp.mggt';
+      emails_default constant varchar2(200) := 'vtrunov@iitp.mggt';
+      err_params xmltype;
+    begin
+      begin
+--        execute immediate 'select get_mail_address.dba_emails from dual' into emails;
+        emails := nvl(emails, emails_default);
+      exception
+        when others then emails := emails_default;
+      end;
+      select updatexml(m_params, '/TABLE/TR/TD/ATTACHMENT/CONTENT/text()', 'skipped') into err_params from dual;
+      t := '<html><body>'||err||chr(10)||'<br/>Сообщение "'||m_name||'".';
+      t := t||chr(10)||'<br/>Отправитель "'||sender||'".';
+      t := t||chr(10)||'<br/>Получатель "'||rcp||'".';
+      t := t||chr(10)||'<br/>Дата отправки '||to_char(m_date, 'dd.mm.yyyy hh24:mi:ss')||'.';
+      t := t||chr(10)||'<br/>Вызвано из '||l_type||' '||l_owner||'.'||l_name||' строка '||l_lineno||'.';
+      t := t||chr(10)||'<br/>Параметры:<br/>'||chr(10)||nvl(m_params, xmltype('<empty>не заданы</empty>')).getclobval()||chr(10)||'<br/></body></html>';
+--      admin.send_mail_html_v3('dvlp@mggt.ru', emails, 'Ошибка в REF_MAIL.SEND_MAIL', t);
+      add_exception('ref_mail.send_mail', null, t);
+    end;
+/*--------------------------------------------------------------------------------------------------------------------*/
   begin
-    select substr(clobagg(','||ve), 2) into vl from (select distinct ve from (
-      select regexp_substr(el, email_regexp, 1, level) ve, regexp_substr(el, etest_regexp, 1, level) vt
-      from dual
-      connect by level <= regexp_count(el, email_regexp)
-    ) where ve = vt);
-    return vl;
+    prepare_mail(m_name, m_date, m_params, sender, rcp, m_subj, m_body, att, err);
+DBMS_OUTPUT.PUT_LINE('TEST5');
+    if err is null then
+DBMS_OUTPUT.PUT_LINE('TEST6');
+      admin.send_mail_html_v3(sender, rcp, m_subj, m_body, att);
+    else
+      send_error(err);
+    end if;
   end;
-  
-
-выполняет проверку списка электронных адресов и возвращает строку, содержащую только допустимые адреса, отфильтрованные на основе регулярного выражения.
