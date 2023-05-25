@@ -1,1 +1,142 @@
-возвращает числовое значение, которое зависит от даты, и если значение не найдено в базе данных, то функция определяет день недели на русском языке и возвращает соответствующее значение.
+  function emp_link(e_id number, p_subj varchar2 := '', p_body varchar2 := '') return varchar2 is
+    lnk varchar(32000);
+    aname varchar2(255);
+    email varchar2(255);
+    displayname varchar2(255);
+    l_subj varchar(32000) := utl_url.escape(p_subj, false, 'utf8');
+    l_body varchar(32000) := utl_url.escape(p_body, false, 'utf8');
+  begin
+    select admin_name into aname from ref_employees where id = e_id;
+    ldap.s_open;
+    email := ldap.search_attr(aname);
+    displayname := ldap.search_attr(aname, 'displayname');
+    ldap.s_close;
+    if email is not null then
+      select nvl2(displayname, '"'||displayname||'" <'||email||'>', email) into lnk from dual;
+      lnk := utl_url.escape(lnk, true, 'utf8');
+      select '<a href="mailto:'||lnk||nvl2(p_subj, '?subject='||l_subj, '')||nvl2(p_body, nvl2(p_subj, '&', '?')||'body='||l_body, '')||'">'||displayname||'</a>' into lnk from dual;
+    end if;
+    return lnk;
+  exception
+    when no_data_found then return '';
+  end;
+  
+  
+    function get_html(m_name varchar2, m_date date, m_params xmltype := null, m_attach clob := null) return clob as
+    h clob := '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+      <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+      <title>{SUBJ}</title>
+      <style type="text/css">
+          #outlook a {padding:0;}
+          body{width:100% !important; -webkit-text-size-adjust:100%; -ms-text-size-adjust:100%; margin:0; padding:0;}
+          .ExternalClass {width:100%;}
+          .ExternalClass, .ExternalClass p, .ExternalClass span, .ExternalClass font, .ExternalClass td, .ExternalClass div {line-height: 100%;}
+          #backgroundTable {margin:0; padding:0; width:100% !important; line-height: 100% !important;}
+          img {outline:none; text-decoration:none; -ms-interpolation-mode: bicubic;}
+          a img {border:none;}
+          .image_fix {display:block;}
+          p {margin: 1em 0;}
+          h1, h2, h3, h4, h5, h6 {color: black !important;}
+          h1 a, h2 a, h3 a, h4 a, h5 a, h6 a {color: blue !important;}
+          h1 a:active, h2 a:active,  h3 a:active, h4 a:active, h5 a:active, h6 a:active {color: red !important;}
+          h1 a:visited, h2 a:visited,  h3 a:visited, h4 a:visited, h5 a:visited, h6 a:visited {color: purple !important;}
+          table td {border-collapse: collapse;}
+          a {color: blue !important;}
+          a:active {color: red !important;}
+          a:visited {color: purple !important;}
+		  .right_align {text-align:right}
+      </style>
+  </head>
+	<body>
+		<table>
+			<tr><th class="right_align">Кому:</th><td>{RECIPIENT}</td></tr>
+			<tr><th class="right_align">От:</th><td>{SENDER}</td></tr>
+			<tr><th class="right_align">Тема:</th><td>{SUBJ}</td></tr>
+			<tr><th class="right_align">Дата:</th><td>{SENDDATE}</td></tr>
+		</table>
+		{ATTACHMENTS}
+		<table cellpadding="0" cellspacing="0" border="0" id="backgroundTable">
+			<tr><td>{BODY}</td></tr>
+		</table>
+	</body>
+</html>';
+    sender varchar2(4000);
+    rcp varchar2(4000);
+    m_subj varchar2(4000);
+    m_body clob;
+    att xmltype;
+    err clob;
+  begin
+    prepare_mail(m_name, m_date, m_params, sender, rcp, m_subj, m_body, att, err);
+    h := replace(h, '{RECIPIENT}', rcp);
+    h := replace(h, '{SENDER}', sender);
+    h := replace(h, '{SUBJ}', m_subj);
+    h := replace(h, '{SENDDATE}', to_char(m_date, 'dd.mm.yyyy hh24:mi:ss'));
+    h := replace(h, '{BODY}', m_body);
+    h := replace(h, '{ATTACHMENTS}', m_attach);
+    return h;
+  end get_html;
+  
+  
+  function get_subj(m_name varchar2, m_date date, m_params xmltype := null) return varchar2 as
+    sender varchar2(4000);
+    rcp varchar2(4000);
+    m_subj varchar2(4000);
+    m_body clob;
+    att xmltype;
+    err clob;
+  begin
+    prepare_mail(m_name, m_date, m_params, sender, rcp, m_subj, m_body, att, err);
+    return m_subj;
+  end get_subj;
+  
+    function validate_email(email_list varchar2) return varchar2 is
+    vl varchar2(32000);
+    el varchar2(32000) := replace(email_list, ' ');
+    email_regexp varchar2(500) := chk_regexp; --'[_]{0,1}([A-Z|a-z|0-9](\.|_|-){0,1})+\@([A-Z|a-z|0-9])+(([\.|_|-]){0,1}[A-Z|a-z|0-9])*\.[A-Z|a-z]{2,6}'
+    etest_regexp varchar2(20) := '[^ ,;:]+';
+  begin
+    select substr(clobagg(','||ve), 2) into vl from (select distinct ve from (
+      select regexp_substr(el, email_regexp, 1, level) ve, regexp_substr(el, etest_regexp, 1, level) vt
+      from dual
+      connect by level <= regexp_count(el, email_regexp)
+    ) where ve = vt);
+    return vl;
+  end;
+  
+  
+  
+      procedure send_error(err clob) is
+      t clob;
+      emails varchar2(4000);
+--      emails_default constant varchar2(200) := 'ekryukov@t80.mggt,artem@iitp.mggt,vtrunov@iitp.mggt';
+      emails_default constant varchar2(200) := 'vtrunov@iitp.mggt';
+      err_params xmltype;
+    begin
+      begin
+--        execute immediate 'select get_mail_address.dba_emails from dual' into emails;
+        emails := nvl(emails, emails_default);
+      exception
+        when others then emails := emails_default;
+      end;
+      select updatexml(m_params, '/TABLE/TR/TD/ATTACHMENT/CONTENT/text()', 'skipped') into err_params from dual;
+      t := '<html><body>'||err||chr(10)||'<br/>Сообщение "'||m_name||'".';
+      t := t||chr(10)||'<br/>Отправитель "'||sender||'".';
+      t := t||chr(10)||'<br/>Получатель "'||rcp||'".';
+      t := t||chr(10)||'<br/>Дата отправки '||to_char(m_date, 'dd.mm.yyyy hh24:mi:ss')||'.';
+      t := t||chr(10)||'<br/>Вызвано из '||l_type||' '||l_owner||'.'||l_name||' строка '||l_lineno||'.';
+      t := t||chr(10)||'<br/>Параметры:<br/>'||chr(10)||nvl(m_params, xmltype('<empty>не заданы</empty>')).getclobval()||chr(10)||'<br/></body></html>';
+--      admin.send_mail_html_v3('dvlp@mggt.ru', emails, 'Ошибка в REF_MAIL.SEND_MAIL', t);
+      add_exception('ref_mail.send_mail', null, t);
+    end;
+    
+    
+      procedure send_vc(m_name varchar2, m_params varchar2 := null) as
+  begin
+    if m_params is null then send(m_name);
+    else send(m_name, xmltype(m_params));
+    end if;
+  end;
