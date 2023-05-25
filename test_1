@@ -1,11 +1,13 @@
-вычисляет и обновляет значения рабочих дней, рабочих часов и коэффициента оплаты для определенного сотрудника в указанном отделе и временном интервале
-
-fot_buh_deductions: эта таблица указана в определении процедуры в качестве типа для параметра bded. Точные детали использования этой таблицы в процедуре не явны, но, вероятно, происходит выборка или обновление данных этой таблицы.
-
-fot_re_wd и fot_re_wd_ord: эти две таблицы используются во всех четырех курсорах. Из этих таблиц выбираются записи, связанные с идентификатором сотрудника (re_id) и идентификатором отдела (rd_id).
-
-ref_employees: эта таблица также используется во всех четырех курсорах для связи с таблицами fot_re_wd и fot_re_wd_ord по полю id.
-
-ref_depts: эта таблица используется во всех курсорах для связи с fot_re_wd и fot_re_wd_ord по полю rd_id.
-
-ref_intervals: эта таблица используется во всех четырех курсорах для связи с fot_re_wd и fot_re_wd_ord по полю id.
+create or replace function tabel_dept_id(dept_id number) return number is
+  d_id number;
+begin
+  select id into d_id from (
+    select level l, max(level) over () ml, id
+    from (select id, case when id = 200335 then null else rd_id end rd_id from tabel_depts)
+    start with id = dept_id
+    connect by id = prior rd_id
+  ) where l = ml-1;
+  return d_id;
+exception
+  when no_data_found then return dept_id;
+end tabel_dept_id;
