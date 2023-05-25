@@ -1,1 +1,70 @@
-отправляет электронные письма с заданными параметрами, включая содержание письма, получателя, отправителя и вложения (при наличии), а также отслеживает возможные ошибки в процессе отправки.
+create or replace FUNCTION CALC_RE_PAY(pay NUMBER, re_wd NUMBER, re_wh NUMBER, re_ko NUMBER, wd NUMBER, wh NUMBER) RETURN NUMBER IS
+  res ref_employees.pay%TYPE;
+BEGIN 
+  IF re_wd IS NOT NULL AND re_wh IS NULL THEN
+    res := ROUND(pay * nvl(re_ko, 1) * re_wd/wd, 2);
+  ELSIF re_wd IS NULL AND re_wh IS NOT NULL THEN
+    res := ROUND(pay * re_wh, 2);
+  ELSIF re_wd IS NOT NULL AND re_wh IS NOT NULL THEN
+    res := ROUND(pay * ROUND(re_wh/wh, 2), 2);
+  END IF;
+  RETURN res;
+END;
+
+
+create or replace FUNCTION fot_re_wd_rls(dept_id number) return varchar2 is
+  res varchar2(100) :='1=2';
+  un varchar2(30);
+  user_dept number;
+
+  function get_user_dept(u_name varchar2) return number is
+    dept number(20);
+  begin
+    select get_dept_id(rd_id) into dept from ref_employees where admin_name like u_name and emp_type = 'Т' and e_date is null;
+    return dept;
+  exception
+    when no_data_found then return null;
+  end get_user_dept;
+begin
+  un := nvl(v('APP_USER'), sys_context('userenv','session_user'));
+  user_dept := nvl(dept_id, get_user_dept(un));
+  if un in ('JOB_PEO_PD_LOADER','FOT','REPDS','PPO') or tabel.emp_latch then
+    res := null;
+--PCBLOGIC-43
+--  elsif un in ('GMEZENIN') then
+  elsif un in ('MSCHIT') then
+      res := '(rd_id in (1293763,1293890))';
+  elsif user_dept = 201076 then
+    res := '(rd_id in (201076,202573,202574))';
+  elsif user_dept in (202573,202574) then
+    res := '(re_id in (select id from ref_employees where get_dept_id(rd_id) = '||user_dept||'))';
+  elsif user_dept is not null then
+    if un in ('LSABO') then
+      res := '(rd_id in ('||user_dept||',200350))';
+    else
+      res := '(rd_id = '||user_dept||')';
+    end if;
+  end if;
+
+  return res;
+end fot_re_wd_rls;
+
+
+create or replace function tabel_dept_id(dept_id number) return number is
+  d_id number;
+begin
+  select id into d_id from (
+    select level l, max(level) over () ml, id
+    from (select id, case when id = 200335 then null else rd_id end rd_id from tabel_depts)
+    start with id = dept_id
+    connect by id = prior rd_id
+  ) where l = ml-1;
+  return d_id;
+exception
+  when no_data_found then return dept_id;
+end tabel_dept_id;
+
+
+
+create or replace function tabel_ra_sum(ra varchar2) return varchar2
+deterministic parallel_enable aggregate using tabel_ra_aggtype;
