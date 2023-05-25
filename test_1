@@ -1,43 +1,107 @@
-procedure send_mail(m_name varchar2, m_params xmltype := null) as 
-    m_date date := sysdate;
-    sender varchar2(4000);
-    rcp varchar2(4000);
-    m_subj varchar2(4000);
-    m_body clob;
-    att xmltype;
-    err clob;
-/*--------------------------------------------------------------------------------------------------------------------*/
-    procedure send_error(err clob) is
-      t clob;
-      emails varchar2(4000);
---      emails_default constant varchar2(200) := 'ekryukov@t80.mggt,artem@iitp.mggt,vtrunov@iitp.mggt';
-      emails_default constant varchar2(200) := 'vtrunov@iitp.mggt';
-      err_params xmltype;
-    begin
-      begin
---        execute immediate 'select get_mail_address.dba_emails from dual' into emails;
-        emails := nvl(emails, emails_default);
-      exception
-        when others then emails := emails_default;
-      end;
-      select updatexml(m_params, '/TABLE/TR/TD/ATTACHMENT/CONTENT/text()', 'skipped') into err_params from dual;
-      t := '<html><body>'||err||chr(10)||'<br/>Сообщение "'||m_name||'".';
-      t := t||chr(10)||'<br/>Отправитель "'||sender||'".';
-      t := t||chr(10)||'<br/>Получатель "'||rcp||'".';
-      t := t||chr(10)||'<br/>Дата отправки '||to_char(m_date, 'dd.mm.yyyy hh24:mi:ss')||'.';
-      t := t||chr(10)||'<br/>Вызвано из '||l_type||' '||l_owner||'.'||l_name||' строка '||l_lineno||'.';
-      t := t||chr(10)||'<br/>Параметры:<br/>'||chr(10)||nvl(m_params, xmltype('<empty>не заданы</empty>')).getclobval()||chr(10)||'<br/></body></html>';
---      admin.send_mail_html_v3('dvlp@mggt.ru', emails, 'Ошибка в REF_MAIL.SEND_MAIL', t);
-      add_exception('ref_mail.send_mail', null, t);
-    end;
-/*--------------------------------------------------------------------------------------------------------------------*/
+procedure prepare_mail(m_name varchar2, m_date date, m_params xmltype, sender out varchar2, rcp out varchar2, m_subj out varchar2, m_body out clob, att out xmltype, err out clob) as
+    type rc_type is ref cursor;
+
+    cursor c_msg(m_name varchar2, m_date date) is
+      select id, sender, subj_template, body_template
+      from ref_messages
+      where name = m_name
+        and m_date between nvl(s_date, m_date) and nvl(e_date, m_date);
+  
+    cursor c_rcp_emp(m_id number, m_date date) is
+      select replace(stragg(ldap.get_email(r.re_id)), ' ')
+      from ref_recipients r join ref_employees e on e.id = r.re_id
+      where r.rmsg_id = m_id
+        and m_date between nvl(r.s_date, m_date) and nvl(r.e_date, m_date)
+        and e.e_date is null;
+  
+    cursor c_rcp_query(m_id number, m_date date) is
+      select r.sql_query
+      from ref_recipients r
+      where r.rmsg_id = m_id
+        and m_date between nvl(r.s_date, m_date) and nvl(r.e_date, m_date)
+        and r.sql_query is not null;
+  
+    cursor c_param(x xmltype) is
+      select pn, dbms_xmlgen.convert(nvl(extract(px, '/TD/*').getclobval(0,2), extract(px, '/TD/text()').getclobval()), 1) pv
+      from xmltable('/TABLE/TR[*[fn:name()="TD"]]' passing x columns pn varchar2(255) path 'TD[1]', px xmltype path 'TD[2]')
+      where pn not in ('[SENDER]', '[SUBJ_TEMPLATE]', '[BODY_TEMPLATE]', '[RECIPIENT]', '[ATTACHMENT]');
+/*      select pn, pv
+      from xmltable('/TABLE/TR[*[fn:name()="TD"]]' passing x columns pn varchar2(255) path 'TD[1]', pv clob path 'TD[2]')
+      where pn not in ('[SENDER]', '[SUBJ_TEMPLATE]', '[BODY_TEMPLATE]', '[RECIPIENT]', '[ATTACHMENT]');*/
+
+    msg c_msg%rowtype;
+    sq rc_type;
+    mail varchar2(255);
   begin
-    prepare_mail(m_name, m_date, m_params, sender, rcp, m_subj, m_body, att, err);
-DBMS_OUTPUT.PUT_LINE('TEST5');
-    if err is null then
-DBMS_OUTPUT.PUT_LINE('TEST6');
-      admin.send_mail_html_v3(sender, rcp, m_subj, m_body, att);
-    else
-      send_error(err);
+  
+  
+DBMS_OUTPUT.PUT_LINE('TEST');
+    -- параметры сообщения
+    open c_msg(m_name, m_date);
+    fetch c_msg into msg;
+    close c_msg;
+DBMS_OUTPUT.PUT_LINE('TEST2');
+    -- берем данные из параметров, если сообщение не найдено в справочнике
+    if msg.id is null then
+      select
+        m_params.extract('/TABLE/TR[TD="[SENDER]"][1]/TD[2]/text()').getStringVal()
+      , m_params.extract('/TABLE/TR[TD="[SUBJ_TEMPLATE]"][1]/TD[2]/text()').getstringval()
+      , dbms_xmlgen.convert(m_params.extract('/TABLE/TR[TD="[BODY_TEMPLATE]"][1]/TD[2]/text()').getclobval(), 1)
+      into msg.sender, msg.subj_template, msg.body_template
+      from dual;
+      if nvl(msg.subj_template, msg.body_template) is not null then
+        msg.id := 0;
+      end if;
     end if;
+    if msg.id is not null then
+      -- email по id сотрудника
+      open c_rcp_emp(msg.id, m_date);
+      fetch c_rcp_emp into rcp;
+      close c_rcp_emp;
+DBMS_OUTPUT.PUT_LINE('TEST3');
+      -- email по запросам
+      for q in c_rcp_query(msg.id, m_date) loop
+        -- замена меток на значения в запросе
+        for p in c_param(m_params) loop
+          q.sql_query := replace(q.sql_query, p.pn, p.pv);
+        end loop;
+        open sq for q.sql_query;
+        loop
+          fetch sq into mail;
+          exit when sq%notfound;
+          rcp := rcp||','||mail;
+        end loop;
+        close sq;
+      end loop;
+      -- email из параметров
+      for r in (select mail from xmltable('/TABLE/TR[TD="[RECIPIENT]"]' passing m_params columns mail varchar2(4000) path 'TD[2]') where mail is not null) loop
+        rcp := rcp||','||r.mail;
+      end loop;
+--      if rcp like ',%' then
+--        rcp := substr(rcp, 2);
+--      end if;
+      rcp := validate_email(rcp);
+      if rcp is not null then
+DBMS_OUTPUT.PUT_LINE('TEST4');
+        m_subj := msg.subj_template;
+        m_body := msg.body_template;
+        for p in c_param(m_params) loop
+          if m_subj like '%'||p.pn||'%' then m_subj := replace(m_subj, p.pn, p.pv); end if;
+          m_body := replace_clob(m_body, p.pn, p.pv);
+        end loop;
+        -- вложения
+        begin
+          select xmlelement("ATTACHMENTS", m_params.extract('/TABLE/TR[TD[1]="[ATTACHMENT]"]/TD[2]/ATTACHMENT')) into att from dual where m_params.existsNode('/TABLE/TR[TD[1]="[ATTACHMENT]"]') = 1;
+        exception
+          when no_data_found then null;
+        end;
+        sender := msg.sender;
+      else
+        err := 'Не найдены получатели.';
+      end if;
+    else
+      err := 'Сообщение не найдено.';
+    end if;
+  exception
+    when others then err := dbms_utility.format_error_stack||chr(10)||dbms_utility.format_error_backtrace;
   end;
