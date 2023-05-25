@@ -1,45 +1,53 @@
-PROCEDURE clear_atr IS
-  BEGIN
-    db_done_account_date := NULL;
-    db_done_acc_no := NULL;
-    db_done_acc_date := NULL;
-    db_err_account_date := NULL;
-    db_err_acc_no := NULL;
-    db_err_acc_date := NULL;
-  END;
+create or replace FUNCTION CALC_RE_PAY(pay NUMBER, re_wd NUMBER, re_wh NUMBER, re_ko NUMBER, wd NUMBER, wh NUMBER) RETURN NUMBER IS
+  res ref_employees.pay%TYPE;
+BEGIN 
+  IF re_wd IS NOT NULL AND re_wh IS NULL THEN
+    res := ROUND(pay * nvl(re_ko, 1) * re_wd/wd, 2);
+  ELSIF re_wd IS NULL AND re_wh IS NOT NULL THEN
+    res := ROUND(pay * re_wh, 2);
+  ELSIF re_wd IS NOT NULL AND re_wh IS NOT NULL THEN
+    res := ROUND(pay * ROUND(re_wh/wh, 2), 2);
+  END IF;
+  RETURN res;
+END;
 
-очищает значения шести атрибутов, устанавливая их в NULL.
-  
-  
-  PROCEDURE get_done_atr(d_no VARCHAR2, skip_id NUMBER) IS
-    CURSOR c_done_atr(d_no VARCHAR2, skip_id NUMBER) IS
-      SELECT s.account_date, s.acc_no, s.acc_date
-      FROM ppo_voldates w, ppo_voldates s
-      WHERE w.id = s.voldate_id
-        AND w.ord_id = (SELECT w1.ord_id FROM ppo_voldates w1, ppo_voldates s1 WHERE w1.id = s1.voldate_id AND s1.id = skip_id )
-        AND s.done_no = d_no
-        AND s.id != skip_id
-      GROUP BY s.account_date, s.acc_no, s.acc_date
-      ORDER BY s.acc_no, s.acc_date, s.account_date;
-  BEGIN
-    clear_atr;
-    OPEN c_done_atr(d_no, skip_id);
-    FETCH c_done_atr INTO db_done_account_date, db_done_acc_no, db_done_acc_date;
-    FETCH c_done_atr INTO db_err_account_date, db_err_acc_no, db_err_acc_date;
-    done_attr_count := c_done_atr%ROWCOUNT;
-    CLOSE c_done_atr;
-/*
-DBMS_OUTPUT.put_line('no - '||db_done_acc_no||'.');
-DBMS_OUTPUT.put_line('err - '||db_err_acc_no||'.');
-DBMS_OUTPUT.put_line('cn - '||done_attr_count||'.');
-*/
-  EXCEPTION
-    WHEN OTHERS THEN
-      IF c_done_atr%ISOPEN THEN
-        CLOSE c_done_atr;
-      END IF;
-  END;
-  
-  
-  получает значения атрибутов из таблицы ppo_voldates на основе заданных параметров d_no и skip_id, сохраняет их в переменные, а также определяет количество полученных атрибутов.
+
+create or replace FUNCTION fot_re_wd_rls(dept_id number) return varchar2 is
+  res varchar2(100) :='1=2';
+  un varchar2(30);
+  user_dept number;
+
+  function get_user_dept(u_name varchar2) return number is
+    dept number(20);
+  begin
+    select get_dept_id(rd_id) into dept from ref_employees where admin_name like u_name and emp_type = 'Т' and e_date is null;
+    return dept;
+  exception
+    when no_data_found then return null;
+  end get_user_dept;
+begin
+  un := nvl(v('APP_USER'), sys_context('userenv','session_user'));
+  user_dept := nvl(dept_id, get_user_dept(un));
+  if un in ('JOB_PEO_PD_LOADER','FOT','REPDS','PPO') or tabel.emp_latch then
+    res := null;
+--PCBLOGIC-43
+--  elsif un in ('GMEZENIN') then
+  elsif un in ('MSCHIT') then
+    res := '(rd_id in (1293763,1293890))';
+  elsif user_dept = 201076 then
+    res := '(rd_id in (201076,202573,202574))';
+  elsif user_dept in (202573,202574) then
+    res := '(re_id in (select id from ref_employees where get_dept_id(rd_id) = '||user_dept||'))';
+  elsif user_dept is not null then
+    if un in ('LSABO') then
+      res := '(rd_id in ('||user_dept||',200350))';
+    else
+      res := '(rd_id = '||user_dept||')';
+    end if;
+  end if;
+
+  return res;
+end fot_re_wd_rls;
+
+
 
