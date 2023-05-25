@@ -11,6 +11,7 @@ BEGIN
   RETURN res;
 END;
 
+Данная функция в БД Oracle CALC_RE_PAY выполняет расчет заработной платы сотрудника с учетом различных корректировок в зависимости от переданных параметров.
 
 create or replace FUNCTION fot_re_wd_rls(dept_id number) return varchar2 is
   res varchar2(100) :='1=2';
@@ -49,6 +50,8 @@ begin
   return res;
 end fot_re_wd_rls;
 
+формирует условие фильтрации данных в зависимости от параметров и имени пользователя, и возвращает полученное условие в виде строки.
+
 
 create or replace function tabel_dept_id(dept_id number) return number is
   d_id number;
@@ -64,7 +67,7 @@ exception
   when no_data_found then return dept_id;
 end tabel_dept_id;
 
-
+выполняет поиск и возвращает идентификатор родительского отдела для заданного идентификатора отдела на основе иерархической структуры данных в таблице tabel_depts.
 
 create or replace function tabel_ra_sum(ra varchar2) return varchar2
 deterministic parallel_enable aggregate using tabel_ra_aggtype;
