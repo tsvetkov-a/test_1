@@ -1,1 +1,14 @@
 
+  procedure send_a(m_name varchar2, m_params xmltype := null) as
+    pragma autonomous_transaction;
+  begin
+    owa_util.who_called_me(l_owner, l_name, l_lineno, l_type);
+    send_mail(m_name, m_params);
+    commit;
+  end;
+  
+    procedure send(m_name varchar2, m_params xmltype := null) as
+  begin
+    owa_util.who_called_me(l_owner, l_name, l_lineno, l_type);
+    send_mail(m_name, m_params);
+  end;
