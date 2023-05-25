@@ -1,53 +1,62 @@
-create or replace FUNCTION CALC_RE_PAY(pay NUMBER, re_wd NUMBER, re_wh NUMBER, re_ko NUMBER, wd NUMBER, wh NUMBER) RETURN NUMBER IS
-  res ref_employees.pay%TYPE;
-BEGIN 
-  IF re_wd IS NOT NULL AND re_wh IS NULL THEN
-    res := ROUND(pay * nvl(re_ko, 1) * re_wd/wd, 2);
-  ELSIF re_wd IS NULL AND re_wh IS NOT NULL THEN
-    res := ROUND(pay * re_wh, 2);
-  ELSIF re_wd IS NOT NULL AND re_wh IS NOT NULL THEN
-    res := ROUND(pay * ROUND(re_wh/wh, 2), 2);
-  END IF;
-  RETURN res;
-END;
-
-
-create or replace FUNCTION fot_re_wd_rls(dept_id number) return varchar2 is
-  res varchar2(100) :='1=2';
-  un varchar2(30);
-  user_dept number;
-
-  function get_user_dept(u_name varchar2) return number is
-    dept number(20);
-  begin
-    select get_dept_id(rd_id) into dept from ref_employees where admin_name like u_name and emp_type = 'Т' and e_date is null;
-    return dept;
-  exception
-    when no_data_found then return null;
-  end get_user_dept;
+create or replace function get_wh(r_date date) return number is
+  cursor c_date(r_date date) is select wh from ref_wh where c_date = r_date;
+  res number(4,2);
+  dy varchar2(2);
+  r_year date := trunc(r_date, 'YYYY');
 begin
-  un := nvl(v('APP_USER'), sys_context('userenv','session_user'));
-  user_dept := nvl(dept_id, get_user_dept(un));
-  if un in ('JOB_PEO_PD_LOADER','FOT','REPDS','PPO') or tabel.emp_latch then
-    res := null;
---PCBLOGIC-43
---  elsif un in ('GMEZENIN') then
-  elsif un in ('MSCHIT') then
-    res := '(rd_id in (1293763,1293890))';
-  elsif user_dept = 201076 then
-    res := '(rd_id in (201076,202573,202574))';
-  elsif user_dept in (202573,202574) then
-    res := '(re_id in (select id from ref_employees where get_dept_id(rd_id) = '||user_dept||'))';
-  elsif user_dept is not null then
-    if un in ('LSABO') then
-      res := '(rd_id in ('||user_dept||',200350))';
-    else
-      res := '(rd_id = '||user_dept||')';
-    end if;
+  open c_date(r_date);
+  fetch c_date into res;
+  close c_date;
+  
+  if res is null then
+    dy := to_char(r_date, 'dy', 'nls_date_language=RUSSIAN');
+    case r_year
+      when to_date('01012012','ddmmyyyy') then
+        if dy not in ('пт','сб','вс') then res := 8.2;
+        elsif dy = 'пт' then res := 7.5;
+        else res := 0;
+        end if;
+      when to_date('01012013','ddmmyyyy') then
+        if r_date between to_date('01062013','ddmmyyyy') and to_date('31082013','ddmmyyyy') then
+          -- лето 2013
+          if dy not in ('пт','сб','вс') then res := 8.4;
+          elsif dy = 'пт' then res := 6.4;
+          else res := 0;
+          end if;
+        else
+          if dy not in ('пт','сб','вс') then res := 8.2;
+          elsif dy = 'пт' then res := 7.2;
+          else res := 0;
+          end if;
+        end if;
+      when to_date('01012014','ddmmyyyy') then
+        if r_date between to_date('01062014','ddmmyyyy') and to_date('31082014','ddmmyyyy') then
+          -- лето 2014
+          if dy not in ('пт','сб','вс') then res := 8.4;
+          elsif dy = 'пт' then res := 6.4;
+          else res := 0;
+          end if;
+        else
+          if dy not in ('пт','сб','вс') then res := 8.2;
+          elsif dy = 'пт' then res := 7.2;
+          else res := 0;
+          end if;
+        end if;
+      else
+        if to_number(to_char(r_date,'mm')) between 6 and 8 then
+          -- лето
+          if dy not in ('пт','сб','вс') then res := 8.4;
+          elsif dy = 'пт' then res := 6.4;
+          else res := 0;
+          end if;
+        else
+          if dy not in ('пт','сб','вс') then res := 8.2;
+          elsif dy = 'пт' then res := 7.2;
+          else res := 0;
+          end if;
+        end if;
+    end case;
   end if;
 
   return res;
-end fot_re_wd_rls;
-
-
-
+end get_wh;
