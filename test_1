@@ -1,73 +1,62 @@
-create or replace FUNCTION CALC_RE_PAY(pay NUMBER, re_wd NUMBER, re_wh NUMBER, re_ko NUMBER, wd NUMBER, wh NUMBER) RETURN NUMBER IS
-  res ref_employees.pay%TYPE;
-BEGIN 
-  IF re_wd IS NOT NULL AND re_wh IS NULL THEN
-    res := ROUND(pay * nvl(re_ko, 1) * re_wd/wd, 2);
-  ELSIF re_wd IS NULL AND re_wh IS NOT NULL THEN
-    res := ROUND(pay * re_wh, 2);
-  ELSIF re_wd IS NOT NULL AND re_wh IS NOT NULL THEN
-    res := ROUND(pay * ROUND(re_wh/wh, 2), 2);
-  END IF;
-  RETURN res;
-END;
+procedure calc_wdh(bded in out fot_buh_deductions%rowtype) is
+	cursor c_wdh(emp number, dept_id number, prd_id number) is
+    select sum(wd) sum_wd, nullif(sum(wh), 0) sum_wh, nullif(sum(whn)/max(whf), 0) ko from (
+    select case when re.stavka in ('П','Н') and rt.ra in ('Я','Н','ОН') then 1 else 0 end wd
+    , case when regexp_like(clobagg(re.stavka) over (), '[НТ]') then nvl(wh,0) else 0 end wh
+    , case when regexp_like(clobagg(re.stavka) over (), 'Н') then nvl(wh,0) else 0 end whn
+    , ri.work_hours whf
+    from fot_re_wd rt join ref_employees re on re.id = rt.re_id join ref_depts rd on rt.rd_id = (case when rd.dept_type = 'А' or rd.id = 200335 then 202573 else rd.id end)
+      join ref_intervals ri on trunc(rt.wd, 'mm') = trunc(ri.e_date,'mm')
+    where emp in (re.id, re.re_id) and rd.id = dept_id and ri.id = prd_id);
 
-Данная функция в БД Oracle CALC_RE_PAY выполняет расчет заработной платы сотрудника с учетом различных корректировок в зависимости от переданных параметров.
+	cursor c_wdh_ord(emp number, dept_id number, prd_id number) is
+    select nullif(sum(case when re.stavka in ('П','Н') and rt.ra in ('Я','Н','ОН') then 1 else 0 end), 0) sum_wd
+    , nullif(sum(case when re.stavka in ('Н','Т') then nvl(rt.wh,0) else 0 end), 0) sum_wh
+    , nullif(sum(case when re.stavka in ('Н') then nvl(rt.wh,0) else 0 end)/max(ri.work_hours), 0) ko
+    from fot_re_wd_ord rt join ref_employees re on re.id = rt.re_id join ref_depts rd on rt.rd_id = (case when rd.dept_type = 'А' or rd.id = 200335 then 202573 else rd.id end)
+      join ref_intervals ri on trunc(rt.wd, 'mm') = trunc(ri.e_date,'mm')
+    where emp in (re.id, re.re_id) and rd.id = dept_id and ri.id = prd_id;
 
-create or replace FUNCTION fot_re_wd_rls(dept_id number) return varchar2 is
-  res varchar2(100) :='1=2';
-  un varchar2(30);
-  user_dept number;
+	cursor c_wdh_f(emp number, dept_id number, prd_id number) is
+    select sum(wd) sum_wd, nullif(sum(wh), 0) sum_wh, nullif(sum(whn)/max(whf), 0) ko from (
+    select case when re.stavka in ('П','Н') and rt.ra in ('Я','Н','ОН') then 1 else 0 end wd
+    , case when regexp_like(clobagg(re.stavka) over (), '[НТ]') then nvl(wh,0) else 0 end wh
+    , case when regexp_like(clobagg(re.stavka) over (), 'Н') then nvl(wh,0) else 0 end whn
+    , ri.work_hours_f whf
+    from fot_re_wd rt join ref_employees re on re.id = rt.re_id join ref_depts rd on rt.rd_id = (case when rd.dept_type = 'А' or rd.id = 200335 then 202573 else rd.id end)
+      join ref_intervals ri on rt.wd between ri.s_date and ri.e_date
+    where emp in (re.id, re.re_id) and rd.id = dept_id and ri.id = prd_id);
 
-  function get_user_dept(u_name varchar2) return number is
-    dept number(20);
-  begin
-    select get_dept_id(rd_id) into dept from ref_employees where admin_name like u_name and emp_type = 'Т' and e_date is null;
-    return dept;
-  exception
-    when no_data_found then return null;
-  end get_user_dept;
+	cursor c_wdh_ord_f(emp number, dept_id number, prd_id number) is
+    select sum(case when re.stavka in ('П','Н') and rt.ra in ('Я','Н','ОН') then 1 else 0 end) sum_wd
+    , nullif(sum(case when re.stavka in ('Н','Т') then nvl(wh,0) else 0 end), 0) sum_wh
+    , nullif(sum(case when re.stavka in ('Н') then nvl(wh,0) else 0 end)/max(ri.work_hours_f), 0) ko
+    from fot_re_wd_ord rt join ref_employees re on re.id = rt.re_id join ref_depts rd on rt.rd_id = (case when rd.dept_type = 'А' or rd.id = 200335 then 202573 else rd.id end)
+      join ref_intervals ri on rt.wd between ri.s_date and ri.e_date
+    where emp in (re.id, re.re_id) and rd.id = dept_id and ri.id = prd_id;
+
 begin
-  un := nvl(v('APP_USER'), sys_context('userenv','session_user'));
-  user_dept := nvl(dept_id, get_user_dept(un));
-  if un in ('JOB_PEO_PD_LOADER','FOT','REPDS','PPO') or tabel.emp_latch then
-    res := null;
---PCBLOGIC-43
---  elsif un in ('GMEZENIN') then
-  elsif un in ('MSCHIT') then
-      res := '(rd_id in (1293763,1293890))';
-  elsif user_dept = 201076 then
-    res := '(rd_id in (201076,202573,202574))';
-  elsif user_dept in (202573,202574) then
-    res := '(re_id in (select id from ref_employees where get_dept_id(rd_id) = '||user_dept||'))';
-  elsif user_dept is not null then
-    if un in ('LSABO') then
-      res := '(rd_id in ('||user_dept||',200350))';
-    else
-      res := '(rd_id = '||user_dept||')';
-    end if;
+  for w in c_wdh(bded.re_id, bded.rd_id, bded.ri_id) loop
+    bded.workdays := w.sum_wd;
+    bded.workhours := w.sum_wh;
+    bded.pay_coeff := w.ko;
+  end loop;
+  for wf in c_wdh_f(bded.re_id, bded.rd_id, bded.ri_id) loop
+    bded.workdays_f := wf.sum_wd;
+    bded.workhours_f := wf.sum_wh;
+    bded.pay_coeff_f := wf.ko;
+  end loop;
+
+  if bded.rd_id = 200347 then
+    for w in c_wdh_ord(bded.re_id, bded.rd_id, bded.ri_id) loop
+      bded.workdays := nullif(nvl(bded.workdays, 0) + nvl(w.sum_wd, 0), 0);
+      bded.workhours := nullif(nvl(bded.workhours, 0) + nvl(w.sum_wh, 0), 0);
+      bded.pay_coeff := nullif(nvl(bded.pay_coeff, 0) + nvl(w.ko, 0), 0);
+    end loop;
+    for wf in c_wdh_ord_f(bded.re_id, bded.rd_id, bded.ri_id) loop
+      bded.workdays_f := nullif(nvl(bded.workdays_f, 0) + nvl(wf.sum_wd, 0), 0);
+      bded.workhours_f := nullif(nvl(bded.workhours_f, 0) + nvl(wf.sum_wh, 0), 0);
+      bded.pay_coeff_f := nullif(nvl(bded.pay_coeff_f, 0) + nvl(wf.ko, 0), 0);
+    end loop;
   end if;
-
-  return res;
-end fot_re_wd_rls;
-
-формирует условие фильтрации данных в зависимости от параметров и имени пользователя, и возвращает полученное условие в виде строки.
-
-
-create or replace function tabel_dept_id(dept_id number) return number is
-  d_id number;
-begin
-  select id into d_id from (
-    select level l, max(level) over () ml, id
-    from (select id, case when id = 200335 then null else rd_id end rd_id from tabel_depts)
-    start with id = dept_id
-    connect by id = prior rd_id
-  ) where l = ml-1;
-  return d_id;
-exception
-  when no_data_found then return dept_id;
-end tabel_dept_id;
-
-выполняет поиск и возвращает идентификатор родительского отдела для заданного идентификатора отдела на основе иерархической структуры данных в таблице tabel_depts.
-
-create or replace function tabel_ra_sum(ra varchar2) return varchar2
-deterministic parallel_enable aggregate using tabel_ra_aggtype;
+end calc_wdh;
