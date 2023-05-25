@@ -7,6 +7,8 @@ PROCEDURE clear_atr IS
     db_err_acc_no := NULL;
     db_err_acc_date := NULL;
   END;
+
+очищает значения шести атрибутов, устанавливая их в NULL.
   
   
   PROCEDURE get_done_atr(d_no VARCHAR2, skip_id NUMBER) IS
@@ -37,4 +39,7 @@ DBMS_OUTPUT.put_line('cn - '||done_attr_count||'.');
         CLOSE c_done_atr;
       END IF;
   END;
+  
+  
+  получает значения атрибутов из таблицы ppo_voldates на основе заданных параметров d_no и skip_id, сохраняет их в переменные, а также определяет количество полученных атрибутов.
 
