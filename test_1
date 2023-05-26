@@ -1,1 +1,631 @@
+create or replace PACKAGE BODY archives_web_2 AS
 
+   /**
+   *
+   */
+    FUNCTION oati_zip (
+        p_arc_id NUMBER
+    ) RETURN BLOB AS
+
+        files      SYS_REFCURSOR;
+        ret        BLOB;
+        x          XMLTYPE;
+        l_inf_path vw_oati_prj.inf_path%TYPE;
+        filename   VARCHAR2(59) := sys_guid();
+        path       VARCHAR2(59) := '\\localhost\files\'
+                             || ws.request_id
+                             || '\';
+    BEGIN
+        debug_pkg.debug_off;
+        debug_pkg.print(path || filename);
+        OPEN files FOR SELECT DISTINCT
+                           inf_path
+                       FROM
+                           vw_oati_prj
+                       WHERE
+                           plc_id = p_arc_id;
+
+        LOOP
+            FETCH files INTO l_inf_path;
+            EXIT WHEN files%notfound;
+            debug_pkg.print(l_inf_path);
+            ws.zip_add(path || filename, l_inf_path);
+        END LOOP;
+
+        CLOSE files;
+        ret := ws.get_file(path || filename);
+        x := ws.c_docx(ws.request(ws.request_delete(path, filename)));
+
+        RETURN ret;
+    END oati_zip;
+
+    /**
+     *
+     */
+    FUNCTION extrip (
+        filename VARCHAR2
+    ) RETURN VARCHAR2 AS
+    BEGIN
+        NULL;
+    END;
+
+    /**
+     *
+     */
+    FUNCTION file_exists (
+        p_dir   IN VARCHAR2,
+        p_fname IN VARCHAR2
+    ) RETURN BOOLEAN AS
+    BEGIN
+        NULL;
+    END;
+
+    /**
+     *
+     */
+    PROCEDURE addfile (
+        inpath        VARCHAR2,
+        outpath       VARCHAR2,
+        cur_id        NUMBER,
+        iid           NUMBER,
+        plan_list1    VARCHAR2,
+        filehandler   utl_file.file_type,
+        loghandler    utl_file.file_type,
+        copyhandler   utl_file.file_type,
+        log_file      VARCHAR2,
+        ls            NUMBER,
+        www_tablename VARCHAR2,
+        path          VARCHAR2
+    ) AS
+    BEGIN
+        NULL;
+    END;
+
+    /**
+     *
+     */
+    PROCEDURE updateisp0 AS
+    BEGIN
+        INSERT INTO archives.www_oati_isp_2@web.mggt (
+            id,
+            no
+        )
+            SELECT
+                id,
+                no
+            FROM
+                oati_isp_0;
+
+    END updateisp0;
+
+    /**
+     * Вставляем заказы
+     */
+    PROCEDURE updateoati1 AS
+    BEGIN
+        INSERT INTO archives.www_oati_2@web.mggt (
+            ord_id,
+            plan_list,
+            ops_date,
+            address,
+            short_name,
+            inn,
+            ent_type,
+            full_name,
+            ogrn,
+            okpo
+        )
+            SELECT
+                id,
+                ops_no,
+                ops_date,
+                address,
+                short_name,
+                inn,
+                ent_type,
+                full_name,
+                ogrn,
+                okpo
+            FROM
+                oati_prj_1;
+
+    END;
+
+    /**
+     * Вставляем заказы
+     */
+    PROCEDURE updateug1 AS
+    BEGIN
+        INSERT INTO archives.www_oati_ug_2@web.mggt (
+            ug_id,
+            plan_list,
+            address,
+            short_name,
+            inn,
+            ent_type,
+            full_name,
+            ogrn,
+            okpo,
+            no,
+            geofond_date,
+            line,
+            name
+        )
+            SELECT
+                id,
+                ops_no,
+                address,
+                short_name,
+                inn,
+                ent_type,
+                full_name,
+                ogrn,
+                okpo,
+                no,
+                geofond_date,
+                line,
+                name
+            FROM
+                oati_ug_1;
+
+    END updateug1;
+
+    /**
+     *
+     */
+    PROCEDURE updateisp1 AS
+    BEGIN
+        INSERT INTO archives.www_oati_isp_2@web.mggt (
+            ug_id,
+            plan_list,
+            address,
+            short_name_2,
+            inn_2,
+            ent_type_2,
+            full_name_2,
+            ogrn,
+            okpo,
+            no,
+            geofond_date,
+            line,
+            name
+        )
+            SELECT
+                id,
+                ops_no,
+                address,
+                short_name,
+                inn,
+                ent_type,
+                full_name,
+                ogrn,
+                okpo,
+                no,
+                geofond_date,
+                line,
+                name
+            FROM
+                oati_isp_1;
+
+    END updateisp1;
+
+    /**
+     * Обновляем заказчиков WWW_OATI_2
+     */
+    PROCEDURE updateoati2 AS
+    BEGIN
+        UPDATE archives.www_oati_2@web.mggt
+        SET
+            ( inn,
+              short_name,
+              ent_type,
+              full_name,
+              ogrn,
+              okpo ) = (
+                SELECT
+                    inn,
+                    short_name,
+                    ent_type,
+                    full_name,
+                    ogrn,
+                    okpo
+                FROM
+                    oati_prj_2
+                WHERE
+                    www_oati_2.id = oati_prj_2.id
+            )
+        WHERE
+            EXISTS (
+                SELECT
+                    1
+                FROM
+                    oati_prj_2
+                WHERE
+                    www_oati_2.id = oati_prj_2.id
+            );
+
+    END;
+
+    /**
+     * Обновление заказчиков для WWW_OATI_UG_2
+     */
+    PROCEDURE updateug2 AS
+    BEGIN
+        UPDATE archives.www_oati_ug_2@web.mggt
+        SET
+            ( inn,
+              short_name,
+              ent_type,
+              full_name,
+              ogrn,
+              okpo ) = (
+                SELECT
+                    inn,
+                    short_name,
+                    ent_type,
+                    full_name,
+                    ogrn,
+                    okpo
+                FROM
+                    oati_ug_2
+                WHERE
+                    www_oati_ug_2.id = oati_ug_2.id
+            )
+        WHERE
+            EXISTS (
+                SELECT
+                    1
+                FROM
+                    oati_ug_2
+                WHERE
+                    www_oati_ug_2.id = oati_ug_2.id
+            );
+
+    END updateug2;
+
+    /**
+     *
+     */
+    PROCEDURE updateisp2 AS
+    BEGIN
+        UPDATE archives.www_oati_isp_2@web.mggt
+        SET
+            ( inn_2,
+              short_name_2,
+              ent_type_2,
+              full_name_2,
+              ogrn,
+              okpo ) = (
+                SELECT
+                    inn,
+                    short_name,
+                    ent_type,
+                    full_name,
+                    ogrn,
+                    okpo
+                FROM
+                    oati_isp_2
+                WHERE
+                    www_oati_isp_2.id = oati_isp_2.id
+            )
+        WHERE
+            EXISTS (
+                SELECT
+                    1
+                FROM
+                    oati_isp_2
+                WHERE
+                    www_oati_isp_2.id = oati_isp_2.id
+            );
+
+    END updateisp2;
+
+    /**
+     * Обновляем записи для ИЧ сданных в геофонд
+     */
+    PROCEDURE updateug3 AS
+    BEGIN
+        UPDATE archives.www_oati_ug_2@web.mggt
+        SET
+            ( no,
+              geofond_date ) = (
+                SELECT
+                    no,
+                    geofond_date
+                FROM
+                    oati_ug_3
+                WHERE
+                    www_oati_ug_2.id = oati_ug_3.id
+            )
+        WHERE
+            EXISTS (
+                SELECT
+                    1
+                FROM
+                    oati_ug_3
+                WHERE
+                    www_oati_ug_2.id = oati_ug_3.id
+            );
+
+    END updateug3;
+
+    /**
+     * Обновляем записи для ИСП сданных в геофонд
+     */
+    PROCEDURE updateisp3 AS
+    BEGIN
+        UPDATE archives.www_oati_isp_2@web.mggt
+        SET
+            ( no,
+              geofond_date ) = (
+                SELECT
+                    no,
+                    geofond_date
+                FROM
+                    oati_isp_3
+                WHERE
+                    www_oati_isp_2.id = oati_isp_3.id
+            )
+        WHERE
+            EXISTS (
+                SELECT
+                    1
+                FROM
+                    oati_isp_3
+                WHERE
+                    www_oati_isp_2.id = oati_isp_3.id
+            );
+
+    END updateisp3;
+
+    /**
+     * Обновляем записи для заказов у которых появились карточки
+     */
+    PROCEDURE updateoati4 AS
+    BEGIN
+        UPDATE archives.www_oati_2@web.mggt
+        SET
+            ( arc_id,
+              plan_list,
+              stamp ) = (
+                SELECT
+                    arc_id,
+                    plan_list,
+                    stamp
+                FROM
+                    oati_prj_4
+                WHERE
+                    www_oati_2.id = oati_prj_4.id
+            )
+        WHERE
+            EXISTS (
+                SELECT
+                    1
+                FROM
+                    oati_prj_4
+                WHERE
+                    www_oati_2.id = oati_prj_4.id
+            );
+
+    END;
+
+    /**
+     * Обновляем записи для ИЧ у которых появились карточки
+     */
+    PROCEDURE updateug4 AS
+    BEGIN
+        UPDATE archives.www_oati_ug_2@web.mggt
+        SET
+            ( arc_id,
+              no,
+              stamp ) = (
+                SELECT
+                    arc_id,
+                    plan_list,
+                    stamp
+                FROM
+                    oati_ug_4
+                WHERE
+                    www_oati_ug_2.id = oati_ug_4.id
+            )
+        WHERE
+            EXISTS (
+                SELECT
+                    1
+                FROM
+                    oati_ug_4
+                WHERE
+                    www_oati_ug_2.id = oati_ug_4.id
+            );
+
+    END updateug4;
+
+    /**
+     * Обновляем записи для ИСП у которых появились карточки
+     */
+    PROCEDURE updateisp4 AS
+    BEGIN
+        UPDATE archives.www_oati_isp_2@web.mggt
+        SET
+            ( arc_id,
+              no,
+              stamp ) = (
+                SELECT
+                    arc_id,
+                    plan_list,
+                    stamp
+                FROM
+                    oati_isp_4
+                WHERE
+                    www_oati_isp_2.id = oati_isp_4.id
+            )
+        WHERE
+            EXISTS (
+                SELECT
+                    1
+                FROM
+                    oati_isp_4
+                WHERE
+                    www_oati_isp_2.id = oati_isp_4.id
+            );
+
+    END updateisp4;
+
+    /**
+     * Обновляем заказы с измененными номерами OPS
+     */
+    PROCEDURE updateoati5 AS
+    BEGIN
+        UPDATE archives.www_oati_2@web.mggt
+        SET
+            ( plan_list,
+              rip,
+              deleted ) = (
+                SELECT
+                    ops_no,
+                    rip,
+                    deleted
+                FROM
+                    oati_prj_5
+                WHERE
+                    www_oati_2.id = oati_prj_5.id
+            )
+        WHERE
+            EXISTS (
+                SELECT
+                    1
+                FROM
+                    oati_prj_5
+                WHERE
+                    www_oati_2.id = oati_prj_5.id
+            );
+
+    END;
+
+    /**
+     *  
+     */
+    PROCEDURE updateoati6 AS
+    BEGIN
+        INSERT INTO archives.www_oati_comm_2@web.mggt (
+            plc_id,
+            line,
+            name
+        )
+            SELECT
+                plc_id,
+                line,
+                name
+            FROM
+                oati_prj_6;
+
+    END;
+
+    /**
+     *
+     */
+    PROCEDURE updateoati7 AS
+    BEGIN
+        UPDATE archives.www_oati_2@web.mggt
+        SET
+            ( rip,
+              deleted ) = (
+                SELECT
+                    NULL,
+                    NULL
+                FROM
+                    oati_prj_7
+                WHERE
+                    www_oati_2.id = oati_prj_7.id
+            )
+        WHERE
+            EXISTS (
+                SELECT
+                    1
+                FROM
+                    oati_prj_7
+                WHERE
+                    www_oati_2.id = oati_prj_7.id
+            );
+
+    END;
+
+    /**
+     *  Обновление ИЧ
+     */
+    PROCEDURE updateug AS
+    BEGIN
+        updateug1;
+        updateug2;
+        updateug3;
+        updateug4;
+    END updateug;
+
+    /**
+     * Обновление ИСП схем
+     */
+    PROCEDURE updateisp AS
+    BEGIN
+        updateisp0;
+        updateisp1;
+        updateisp2;
+        updateisp3;
+        updateisp4;
+    END updateisp;
+
+    /**
+     *
+     */
+    PROCEDURE updateoati AS
+    BEGIN
+        updateoati1;
+        updateoati2;
+        updateoati4;
+        updateoati5;
+        updateoati6;
+        updateoati7;
+    END;
+
+    /**
+     *
+     */
+    PROCEDURE checkoati AS
+    BEGIN
+    -- TODO: Implementation required for PROCEDURE ARCHIVES_WEB_2.checkoati
+        NULL;
+    END checkoati;
+
+    /**
+     *
+     */
+    PROCEDURE checkug AS
+    BEGIN
+    -- TODO: Implementation required for PROCEDURE ARCHIVES_WEB_2.checkug
+        NULL;
+    END checkug;
+
+    /**
+     *
+     */
+    PROCEDURE checklist (
+        inpath     VARCHAR2,
+        cur_id     NUMBER,
+        iid        NUMBER,
+        plan_list1 VARCHAR2,
+        ls         NUMBER
+    ) AS
+    BEGIN
+    -- TODO: Implementation required for PROCEDURE ARCHIVES_WEB_2.checklist
+        NULL;
+    END checklist;
+
+    /**
+     *
+     */
+    PROCEDURE updatewebdb AS
+    BEGIN
+    -- TODO: Implementation required for PROCEDURE ARCHIVES_WEB_2.updatewebdb
+        NULL;
+    END updatewebdb;
+
+END archives_web_2;
