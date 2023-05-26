@@ -39,6 +39,9 @@ create or replace PACKAGE BODY archives_web_2 AS
         RETURN ret;
     END oati_zip;
 
+Создает ZIP-архив, содержащий файлы связанные с определенным архивным идентификатором, и возвращает этот архив в виде BLOB-объекта.
+vw_oati_prj
+
     /**
      *
      */
