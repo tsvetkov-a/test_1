@@ -1,2 +1,34 @@
 {аванс цифры коп}	Метка {аванс цифры} с копейками для qr-кода. Там должно в конце два нуля вроде приписываться.
 (для примера {заказ_закр_доплата_цифра коп} )
+
+
+        cursor  c_prd_pp(o_id pls_integer)  is
+            select max(e_date_fact) keep (dense_rank first order by INSERTED desc)
+                from vw_ord_prd where
+                    ro_id=1293743
+                    and e_date_fact is not null
+                    and ord_id=o_id /*Предварительная проверка*/;
+
+    r_ord       c_ord%rowtype;
+    r_my        c_money%rowtype;
+    r_my856    c_money_856%rowtype;
+    r_adv       number(25, 2);
+    r_advpay    number(25, 2);
+    r_advpay_stg    number(25, 2);
+    r_advnds    number(25, 2);
+    r_ispst     number(25, 2);
+    x7          number(25, 2);
+    x8          number(25, 2);
+    
+    
+    open c_ispst(ord_id);
+    fetch c_ispst into r_ispst;
+    close c_ispst;
+    r_ispst := nvl(r_ispst, 0);
+    x7 := abs(round(r_ispst*(1 + cNDS) - r_advpay, 2));
+    x8 := round(x7 - x7/(1 + cNDS), 2);
+    put_value('заказ_закр_доплата_цифра', x7);
+    put_value_money('заказ_закр_доплата_пропись', x7);
+    add_label('{заказ_закр_доплата_цифра коп}', to_char(x7*100, 'FM99999999999000'));
+    put_value('НДС_заказ_закр_доплата_цифра',    x8);
+    put_value_money('НДС_заказ_закр_доплата_пропись', x8);
