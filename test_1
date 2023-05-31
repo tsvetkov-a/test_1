@@ -1,162 +1,153 @@
---Вызов: forms, триггер pord_auto_oper_o4
-PROCEDURE add_O4_prd (vd_in pls_integer) IS
-vtype varchar2(4);
-vid pls_integer;
-oid pls_integer;
-is_kp pls_integer;
-sdate date;
-edate date;
-aper date;
-mes varchar2(50);
-vvol number;
-dd DATE;
+PROCEDURE auto_prd_rec (stg varchar2, ro pls_integer, re pls_integer default null, msr varchar2 default null, vol number default null,
+                                                sd date default null, ed date default null, ad date default null,
+                                                sd_add pls_integer default null, ed_add pls_integer default null,
+                                                rc pls_integer default null, cadd pls_integer default NULL, brigade pls_integer DEFAULT null) IS
+c_1 PLS_INTEGER;
+c_2 PLS_INTEGER;
+BEGIN
+    IF cadd IS NOT NULL THEN SELECT id INTO c_1 FROM ref_com_add WHERE id = cadd; END IF;
+    IF rc IS NOT NULL THEN SELECT id INTO c_2 FROM ref_com WHERE id = rc; END IF;
+    execute immediate 'INSERT INTO ppo_productions (voldate_id, stage, ro_id, re_id, measure, volume, t_date, e_date, a_date, cadd_id, rc_id, brigade) values (:a,:b,:c,:d,:e,:f,:g,:h,:i,:j,:k,:l)' USING
+        vd, stg, ro, re, msr, vol,
+        CASE WHEN sd IS NOT NULL THEN addworkdays(sd,nvl(sd_add,0)) ELSE NULL END,
+        CASE WHEN ed IS NOT NULL THEN ed WHEN sd IS NOT NULL AND ed_add IS NOT NULL THEN addworkdays(sd,ed_add) ELSE NULL END,
+        CASE WHEN ad IS NOT NULL THEN ad ELSE NULL END,
+        CASE WHEN cadd IS NOT NULL THEN c_1 ELSE NULL END,
+        CASE WHEN rc IS NOT NULL THEN c_2 ELSE NULL END,
+        CASE WHEN brigade IS NOT NULL THEN ADMIN.N_LIST(brigade) ELSE NULL END;
+
+END;
+
+PROCEDURE auto_prd_rec_ugp (stg varchar2, nid pls_integer, re pls_integer default null, msr varchar2 default null, vol number default null,
+                                                sd date default null, ed date default null, ad date default null,
+                                                sd_add pls_integer default null, ed_add pls_integer default null,
+                                                rc pls_integer default null, cadd pls_integer default NULL, brigade pls_integer DEFAULT null) IS
+c_1 PLS_INTEGER;
+c_2 PLS_INTEGER;
+rd PLS_INTEGER;
+ro PLS_INTEGER;
+reid pls_integer;
+BEGIN
+    IF cadd IS NOT NULL THEN SELECT id INTO c_1 FROM ref_com_add WHERE id = cadd; END IF;
+    IF rc IS NOT NULL THEN SELECT id INTO c_2 FROM ref_com WHERE id = rc; END IF;
+    SELECT executor INTO rd FROM ppo_voldates WHERE (id = vd OR id = (SELECT voldate_id FROM ppo_voldates WHERE id = vd)) AND executor IS NOT NULL;
+    SELECT id, nvl(re_id,re) INTO ro, reid FROM ref_operations WHERE stage = stg AND rd_id = rd AND name_id = nid;
+    execute immediate 'INSERT INTO ppo_productions (voldate_id, stage, ro_id, re_id, measure, volume, t_date, e_date, a_date, cadd_id, rc_id, brigade) values (:a,:b,:c,:d,:e,:f,:g,:h,:i,:j,:k,:l)' USING
+        vd, stg, ro, reid, msr, vol,
+        CASE WHEN sd IS NOT NULL THEN addworkdays(sd,nvl(sd_add,0)) ELSE NULL END,
+        CASE WHEN ed IS NOT NULL THEN ed WHEN sd IS NOT NULL AND ed_add IS NOT NULL THEN addworkdays(sd,ed_add) ELSE NULL END,
+        CASE WHEN ad IS NOT NULL THEN ad ELSE NULL END,
+        CASE WHEN cadd IS NOT NULL THEN c_1 ELSE NULL END,
+        CASE WHEN rc IS NOT NULL THEN c_2 ELSE NULL END,
+        CASE WHEN brigade IS NOT NULL THEN ADMIN.N_LIST(brigade) ELSE NULL END;
+
+END;
+
+PROCEDURE eco_after_duty (vd_in pls_integer) IS
+is_sec VARCHAR2(1);
 BEGIN
     vd := vd_in;
-    SELECT voldate_type into vtype from ppo_voldates where id = vd_in;
-    IF vtype = 'STG' then
-        SELECT s.voldate_id, w.ord_id
-            into vid, oid
-            from ppo_voldates s, ppo_voldates w where s.id = vd_in and w.id = s.voldate_id;
-    ELSE
-        SELECT ord_id
-            into oid
-            from ppo_voldates where id = vd_in;
-        vid := vd_in;
-    END if;
-    SELECT duty_date INTO dd FROM ppo_orders WHERE id = OID;
-    select count(id) into is_kp from ppo_voldates where kind in ('кп') and executor = 201085 and ord_id = oid;
-    if is_kp > 0 then
-        auto_prd_rec('КПП',1164053,201508,null,null,null,addworkdays(dd,3));
-        auto_prd_rec('КПК',1170055,201508,null,null,null,addworkdays(dd,4));
-        auto_prd_rec('КПК',1170056,201508,null,null,null,addworkdays(dd,5));
-        auto_prd_rec('КПК',1170057,203407,null,null,null,addworkdays(dd,6),null,null,null,null,null,201729);
-        auto_prd_rec('КПК',1170058,205361,null,null,null,addworkdays(dd,7),null,null,null,null,null,205361);
+    for rec1 in (select confident from ppo_orders where id =
+        (select ord_id FROM ppo_voldates WHERE id = vd
+         UNION ALL
+         SELECT ord_id FROM ppo_voldates WHERE id =
+         (SELECT voldate_id FROM ppo_voldates WHERE id = vd))) LOOP
+         is_sec := nvl(rec1.confident,'N');
+    END LOOP;
+    auto_prd_rec('ПЭ', 283653, 201637);
+    auto_prd_rec('ПЭ', 283654, 201637);
+    auto_prd_rec('ПЭ', 283655, 201637);
+    auto_prd_rec('ЛЭ', 283656, 227622);
+    auto_prd_rec('ЛЭ', 283657, 201759);
+    auto_prd_rec('КЭ', 283658, 227622);
+    auto_prd_rec('КЭ', 283659, 201759);
+    auto_prd_rec('ОЭ', 283660, 227622);
+    auto_prd_rec('ОЭ', 283661, 201743);
+    if is_sec = 'Y' then
+        auto_prd_rec('ОЭ', 283662, 201676);
+    else
+        auto_prd_rec('ОЭ', 283662, 207173);
     end if;
 END;
 
-
-PROCEDURE add_o6_is_prd (vd_in pls_integer) IS
-vtype varchar2(4);
-vid pls_integer;
-oid pls_integer;
-is_323 pls_integer;
-sdate date;
-edate date;
-aper date;
-mes varchar2(50);
-vvol number;
-cadd_id_is pls_integer;
-rc_id_is pls_integer;
+PROCEDURE eco_before_duty (vd_in pls_integer) IS
 BEGIN
     vd := vd_in;
-    SELECT voldate_type into vtype from ppo_voldates where id = vd_in;
-    if vtype = 'STG' then
-        SELECT s.voldate_id, w.ord_id, s.volume, s.s_date, s.e_date, s.accel_per, s.measure
-            INTO vid, oid, vvol, sdate, edate, aper, mes
-            FROM ppo_voldates s, ppo_voldates w where s.id = vd_in and w.id = s.voldate_id;
-    ELSE
-        RETURN;
-    END if;
-    SELECT count(id) into is_323 from ppo_voldates where kind in ('323') and executor = 200347 and ord_id = oid;
-    if is_323 > 0 then
-        for rec1 in (select cadd_id,rc_id from ppo_productions where voldate_id = vd_in and stage = 'П' and ro_id = 203169) LOOP
-            cadd_id_is := rec1.cadd_id;
-            rc_id_is := rec1.rc_id;
-            exit;
-        end loop;
-        auto_prd_rec ('К', 266779, 200522, 'точка', null, null, null, null, null, null, rc_id_is, cadd_id_is);
-        auto_prd_rec ('К', 203260, 200571, 'пм', null, null, null, null, null, null, rc_id_is, cadd_id_is);
-        auto_prd_rec ('КК', 203262, 200571, 'пм', null, null, null, null, null, null, rc_id_is, cadd_id_is);
-        auto_prd_rec ('К', 266981, 200571, 'пм', null, null, null, null, null, null, rc_id_is, cadd_id_is);
-        auto_prd_rec ('ВВ', 203264, 200571, 'пм', null, null, null, null, null, null, rc_id_is, cadd_id_is);
-        auto_prd_rec ('ВВ', 549165, 200571, 'пм', null, null, null, null, null, null, rc_id_is, cadd_id_is);
-        auto_prd_rec ('ВВ', 272680, 200518, 'пм', null, null, null, null, null, null, rc_id_is, cadd_id_is);
-    end if;
+    auto_prd_rec('ПРЭ', 283651, 227622);
+    auto_prd_rec('ПРЭ', 283652, 201729);
 END;
 
-
-PROCEDURE add_o6_ks_prd (vd_in pls_integer) IS
-vtype varchar2(4);
-vid pls_integer;
-oid pls_integer;
-is_313 pls_integer;
-sdate date;
-edate date;
-aper date;
-mes varchar2(50);
-vvol number;
+PROCEDURE eco_after_duty (vd_in pls_integer) IS
+is_sec VARCHAR2(1);
 BEGIN
     vd := vd_in;
-    SELECT voldate_type into vtype from ppo_voldates where id = vd_in;
-    IF vtype = 'STG' then
-        SELECT s.voldate_id, w.ord_id, s.volume, s.s_date, s.e_date, s.accel_per, s.measure
-            into vid, oid, vvol, sdate, edate, aper, mes
-            from ppo_voldates s, ppo_voldates w where s.id = vd_in and w.id = s.voldate_id;
-    ELSE
-        SELECT ord_id, volume, s_date, e_date, accel_per, measure
-            into oid, vvol, sdate, edate, aper, mes
-            from ppo_voldates where id = vd_in;
-        vid := vd_in;
-    END if;
-    select count(id) into is_313 from ppo_voldates where kind in ('313') and executor = 200347 and ord_id = oid;
-    if is_313 > 0 then
-        auto_prd_rec('П',203169,201464,null,null,sdate,null,null,0,2);
-        auto_prd_rec('К',203256,200522,null,null,sdate,null,null,6,7);
-        auto_prd_rec('К',203271,200522,null,null,sdate,null,null,8,11);
-        auto_prd_rec('К',268373,200522,null,null,sdate,null,null,8,9);
-        auto_prd_rec('К',549108,200522,null,null,sdate,null,null,1,2);
+    for rec1 in (select confident from ppo_orders where id =
+        (select ord_id FROM ppo_voldates WHERE id = vd
+         UNION ALL
+         SELECT ord_id FROM ppo_voldates WHERE id =
+         (SELECT voldate_id FROM ppo_voldates WHERE id = vd))) LOOP
+         is_sec := nvl(rec1.confident,'N');
+    END LOOP;
+    auto_prd_rec('ПЭ', 283653, 201637);
+    auto_prd_rec('ПЭ', 283654, 201637);
+    auto_prd_rec('ПЭ', 283655, 201637);
+    auto_prd_rec('ЛЭ', 283656, 227622);
+    auto_prd_rec('ЛЭ', 283657, 201759);
+    auto_prd_rec('КЭ', 283658, 227622);
+    auto_prd_rec('КЭ', 283659, 201759);
+    auto_prd_rec('ОЭ', 283660, 227622);
+    auto_prd_rec('ОЭ', 283661, 201743);
+    if is_sec = 'Y' then
+        auto_prd_rec('ОЭ', 283662, 201676);
+    else
+        auto_prd_rec('ОЭ', 283662, 207173);
     end if;
 END;
 
-
-PROCEDURE add_okr_prd_list (ord_in varchar2, prd_type pls_integer, usr VARCHAR2) IS
-n548 NUMBER;
-n549 NUMBER;
-n550 NUMBER;
-n551 NUMBER;
-n552 NUMBER;
-n553 NUMBER;
-n554 NUMBER;
-n555 NUMBER;
-n556 NUMBER;
-usr_id NUMBER;
+PROCEDURE std_geo_after_duty (vd_in pls_integer) IS
+is_sec VARCHAR2(1);
 BEGIN
-    FOR rec IN (SELECT w.id, w.ord_id FROM ppo_voldates w, table(str2table(ord_in,',')) t WHERE w.kind = '1127' AND w.executor = 548281 AND w.ord_id = t.column_value) LOOP
-      vd := rec.id;
-
-    if prd_type = 110 then   --Создать досъем
-        select max(case when name_id=551 then id end),
-               max(case when name_id=552 then id end),
-               max(case when name_id=554 then id end),
-               max(case when name_id=555 then id end),
-               max(case when name_id=556 then id end) into n551, n552, n554, n555, n556
-        from ref_operations where name_id in (551,552,554,555,556) and rd_id=548281;
-        select id into usr_id from ref_employees where admin_name=usr and e_date is null and EMP_TYPE='Т';
-        auto_prd_rec ('ДПС', n551, 26487233, null, null, trunc(sysdate));
-        auto_prd_rec ('ДПС', n552, 26498242, null, null, trunc(sysdate));
-        auto_prd_rec ('ДПС', n554, 26498198, null, null, trunc(sysdate));
-        auto_prd_rec ('ДПС', n555, usr_id, null, null, trunc(sysdate));
-        auto_prd_rec ('ДПС', n556, 22890979, null, null, trunc(sysdate));
-    elsif prd_type = 111 then --Досъем: в поле
-        select max(case when name_id=548 then id end),
-               max(case when name_id=549 then id end),
-               max(case when name_id=550 then id end) into n548, n549, n550
-        from ref_operations where name_id in (548,549,550) and rd_id=548281;
-        auto_prd_rec ('ДПС', n548, 9447347, null, null, trunc(sysdate));
-        auto_prd_rec ('ДПС', n549, 6589353, null, null, trunc(sysdate));
-        auto_prd_rec ('ДПС', n550, 9447347, null, null, trunc(sysdate));
-    else                    --112 Досъем: полевой контроль
-        select id into n553 from ref_operations where name_id=553 and rd_id=548281;
-        auto_prd_rec ('ДПС', n553, 25628827, null, null, trunc(sysdate));
+    vd := vd_in;
+    for rec1 in (select confident from ppo_orders where id =
+        (select ord_id FROM ppo_voldates WHERE id = vd
+         UNION ALL
+         SELECT ord_id FROM ppo_voldates WHERE id =
+         (SELECT voldate_id FROM ppo_voldates WHERE id = vd))) LOOP
+         is_sec := nvl(rec1.confident,'N');
+    END LOOP;
+    auto_prd_rec('ПМ', 272431, 203847);
+    auto_prd_rec('ПМ', 272432, 203847);
+    auto_prd_rec('ПМ', 272569, 203847);
+    auto_prd_rec('ПМ', 272433, 203847);
+    auto_prd_rec('П', 272434, 201714);
+    auto_prd_rec('П', 272859, 201714);
+    auto_prd_rec('П', 272860, 201714);
+    auto_prd_rec('П', 272570, 203503);
+    auto_prd_rec('ГР', 272555, 201704);
+    auto_prd_rec('ГР', 272503, 201704);
+    auto_prd_rec('Л', 543998, 225525);
+    auto_prd_rec('Л', 543997, 225525);
+    auto_prd_rec('Л', 543996, 225525);
+    auto_prd_rec('Л', 272439, 225525);
+    auto_prd_rec('К', 272442, 201704);
+    auto_prd_rec('К', 272440, 206542);
+    auto_prd_rec('К', 543991, 201751);
+    auto_prd_rec('К', 273116, 201706);
+    auto_prd_rec('ОТК', 272443, 1132824);
+    auto_prd_rec('ОТК', 272441, 201729);
+    if is_sec = 'Y' then
+        auto_prd_rec('ОТК', 272444, 201676);
+    else
+        auto_prd_rec('ОТК', 272444, 207173);
     end if;
-   END LOOP;
 END;
 
+PROCEDURE std_geo_before_duty (vd_in pls_integer) IS
+BEGIN
+    vd := vd_in;
+    auto_prd_rec('ПР', 272560, 201676);
+    auto_prd_rec('ПР', 272561, 201704);
+    auto_prd_rec('ПР', 272562, 206542);
+    auto_prd_rec('ПР', 272507, 201729);
+END;
 
-add_O4_prd: Эта процедура обрабатывает входные данные, проводит определенные выборки из таблицы ppo_voldates на основе условий, затем, если выполнено условие is_kp > 0, вызывает другую процедуру auto_prd_rec для автоматического создания записей с предоставленными параметрами.
-
-add_o6_is_prd: Эта процедура аналогична предыдущей, но она также обрабатывает данные из таблицы ppo_productions и вызывает auto_prd_rec для автоматического создания записей в случае, если условие is_323 > 0 выполнено.
-
-add_o6_ks_prd: Эта процедура похожа на две предыдущие, но она работает с другим набором данных и вызывает auto_prd_rec для автоматического создания записей в случае, если условие is_313 > 0 выполнено.
-
-add_okr_prd_list: Эта процедура проходит через список заказов и в зависимости от входного параметра prd_type автоматически создает различные наборы записей, вызывая процедуру auto_prd_rec с различными параметрами.
