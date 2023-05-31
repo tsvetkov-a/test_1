@@ -1,132 +1,128 @@
-create or replace PACKAGE BODY AUTO_ORD_PCK IS
-
-FUNCTION get_cont_part (cntID PLS_INTEGER, ttype PLS_INTEGER, ccomp PLS_INTEGER, isbridge VARCHAR2 DEFAULT NULL) RETURN NUMBER IS
+  FUNCTION insert_work(p_category varchar2, p_kind varchar2, p_executor number, p_measure varchar2, p_volume number, p_volume_fact number, p_is_working VARCHAR2, p_no VARCHAR2 DEFAULT NULL, p_are PLS_INTEGER DEFAULT NULL) return number is
 /*####################################################################################################################*/
-/* Расчет суммарной площади пересечения конкретного контура заказа с балансом территорий. Дополнительно задается
-/* категория сложности и тип территории. Параметр ISBRIDGE может принимать значания B и B2- пересечение с территориями
-/* мостов, тоннелей и эстакад, C - пересечение с территориями ЦАО, W - пересечение с объектами гидрографии, L - терри-
-/* тории спецрежима (ЛЭП и пр.), T - узкие полосы в балансе территорий (T2 - для 2000-ка), G - ЖД, D - дороги, LEP - ЛЭП
-/* Z - детализированная застроенная и N - детализированная незастроенная (N1 - без гидрографии).
+/* Функция добавления работы/этапа в заказ. Возвращает идентификатор работы/этапа.
 /*####################################################################################################################*/
-  sq NUMBER := 0;
-BEGIN
-  IF isbridge IS NULL THEN
-    SELECT nvl(ROUND(SUM(SDO_GEOM.sdo_area(SDO_GEOM.sdo_intersection(c1.contour,c2.contour,0.001),0.001))/10000,2),0)
-      INTO sq
-      FROM ppo_contours c1 JOIN ref_terr_balance c2 ON SDO_FILTER(c2.contour,c1.contour) = 'TRUE'
-      WHERE c1.id = cntid AND sdo_geom.RELATE(c1.contour,'ANYINTERACT',c2.contour,0.001) = 'TRUE'
-      AND c2.type_terr IN ('нж', 'ж', 'п', 'д', 'г', 'р', 'рф')
-      AND c2.type_terr_smeta = CASE WHEN ttype > 0 THEN ttype ELSE c2.type_terr_smeta END AND c2.cat_complexity = CASE WHEN ccomp > 0 THEN ccomp ELSE c2.cat_complexity END;
-  ELSIF isbridge = 'B' THEN
-    SELECT nvl(ROUND(sum(SDO_GEOM.sdo_area(SDO_GEOM.sdo_intersection(SDO_GEOM.sdo_intersection(c1.contour,c2.contour,0.001),c3.contour,0.001),0.001))/10000,2),0)
-      INTO sq
-      FROM ppo.ppo_contours c1 JOIN ref_terr_balance c2 ON SDO_FILTER(c2.contour,c1.contour) = 'TRUE' JOIN ref_terr_balance c3 ON SDO_FILTER(c3.contour,c1.contour) = 'TRUE'
-      WHERE c1.id = cntID AND sdo_geom.RELATE(c1.contour,'ANYINTERACT',c2.contour,0.001) = 'TRUE'
-      AND sdo_geom.RELATE(c1.contour,'ANYINTERACT',c3.contour,0.001) = 'TRUE'
-      AND c2.type_terr IN ('нж', 'ж', 'п', 'д', 'г', 'р', 'рф') AND c3.type_terr IN ('ма','мж')
-      AND c2.type_terr_smeta = CASE WHEN ttype > 0 THEN ttype ELSE c2.type_terr_smeta END AND c2.cat_complexity = CASE WHEN ccomp > 0 THEN ccomp ELSE c2.cat_complexity END;
-  ELSIF isbridge = 'B2' THEN
-    SELECT nvl(ROUND(sum(SDO_GEOM.sdo_area(SDO_GEOM.sdo_intersection(SDO_GEOM.sdo_intersection(c1.contour,c2.contour,0.001),c3.contour,0.001),0.001))/10000,2),0)
-      INTO sq
-      FROM ppo.ppo_contours c1 JOIN ref_terr_balance c2 ON SDO_FILTER(c2.contour,c1.contour) = 'TRUE' JOIN ref_terr_balance c3 ON SDO_FILTER(c3.contour,c1.contour) = 'TRUE'
-      WHERE c1.id = cntID AND sdo_geom.RELATE(c1.contour,'ANYINTERACT',c2.contour,0.001) = 'TRUE'
-      AND sdo_geom.RELATE(c1.contour,'ANYINTERACT',c3.contour,0.001) = 'TRUE'
-      AND c2.type_terr IN ('нж', 'ж', 'п', 'д', 'г', 'р', 'рф') AND c3.type_terr IN ('па','пж','эа','эж')
-      AND c2.type_terr_smeta = CASE WHEN ttype > 0 THEN ttype ELSE c2.type_terr_smeta END AND c2.cat_complexity = CASE WHEN ccomp > 0 THEN ccomp ELSE c2.cat_complexity END;
-  ELSIF isbridge = 'C' THEN
-    SELECT nvl(ROUND(sum(SDO_GEOM.sdo_area(SDO_GEOM.sdo_intersection(c1.contour,c2.contour,0.001),0.001))/10000,2),0)
-      INTO sq
-      FROM ppo.ppo_contours c1 JOIN ref_terr_balance c2 ON SDO_FILTER(c2.contour,c1.contour) = 'TRUE'
-      WHERE c1.id = cntID AND sdo_geom.RELATE(c1.contour,'ANYINTERACT',c2.contour,0.001) = 'TRUE'
-      AND c2.type_terr IN ('цао');
-  ELSIF isbridge = 'W' THEN
-    SELECT nvl(ROUND(sum(SDO_GEOM.sdo_area(SDO_GEOM.sdo_intersection(c1.contour,c2.contour,0.001),0.001))/10000,2),0)
-      INTO sq
-      FROM ppo.ppo_contours c1 JOIN ref_terr_balance c2 ON SDO_FILTER(c2.contour,c1.contour) = 'TRUE'
-      WHERE c1.id = cntID AND sdo_geom.RELATE(c1.contour,'ANYINTERACT',c2.contour,0.001) = 'TRUE' AND c2.type_terr IN ('г')
-      AND c2.type_terr_smeta = ttype AND c2.cat_complexity = ccomp;
-  ELSIF isbridge = 'L' THEN
-    SELECT nvl(ROUND(sum(SDO_GEOM.sdo_area(SDO_GEOM.sdo_intersection(c1.contour,c2.contour,0.001),0.001))/10000,2),0)
-      INTO sq
-      FROM ppo.ppo_contours c1 JOIN ref_terr_balance c2 ON SDO_FILTER(c2.contour,c1.contour) = 'TRUE'
-      WHERE c1.id = cntID AND sdo_geom.RELATE(c1.contour,'ANYINTERACT',c2.contour,0.001) = 'TRUE' AND c2.type_terr IN ('лэп','д')
-      AND c2.type_terr_smeta = CASE WHEN ttype > 0 THEN ttype ELSE c2.type_terr_smeta END AND c2.cat_complexity = CASE WHEN ccomp > 0 THEN ccomp ELSE c2.cat_complexity END;
-  ELSIF isbridge = 'T' THEN
-    SELECT nvl(ROUND(sum(SDO_GEOM.sdo_area(SDO_GEOM.sdo_intersection(c1.contour,c2.contour,0.001),0.001))/10000,2),0)
-      INTO sq
-      FROM (SELECT ws.get_thin_strips(contour,p_size => 70) contour FROM ppo_contours WHERE id = cntID) c1, ref_terr_balance c2
-      WHERE SDO_FILTER(c2.contour,c1.contour) = 'TRUE' AND sdo_geom.RELATE(c1.contour,'ANYINTERACT',c2.contour,0.001) = 'TRUE'
-      AND c2.type_terr IN ('нж', 'ж', 'п', 'д', 'г', 'р', 'рф')
-      AND c2.type_terr_smeta = ttype AND c2.cat_complexity = ccomp;
-  ELSIF isbridge = 'T2000' THEN
-    SELECT nvl(ROUND(sum(SDO_GEOM.sdo_area(SDO_GEOM.sdo_intersection(c1.contour,c2.contour,0.001),0.001))/10000,2),0)
-      INTO sq
-      FROM (SELECT ws.get_thin_strips(contour,p_size => 150) contour FROM ppo_contours WHERE id = cntID) c1, ref_terr_balance c2
-      WHERE SDO_FILTER(c2.contour,c1.contour) = 'TRUE' AND sdo_geom.RELATE(c1.contour,'ANYINTERACT',c2.contour,0.001) = 'TRUE'
-      AND c2.type_terr IN ('нж', 'ж', 'п', 'д', 'г', 'р', 'рф')
-      AND c2.type_terr_smeta = ttype AND c2.cat_complexity = ccomp;
-  ELSIF isbridge = 'G' THEN
-    SELECT nvl(ROUND(sum(SDO_GEOM.sdo_area(SDO_GEOM.sdo_intersection(c1.contour,c2.contour,0.001),0.001))/10000,2),0)
-      INTO sq
-      FROM ppo.ppo_contours c1 JOIN ref_terr_balance c2 ON SDO_FILTER(c2.contour,c1.contour) = 'TRUE'
-      WHERE c1.id = cntID AND sdo_geom.RELATE(c1.contour,'ANYINTERACT',c2.contour,0.001) = 'TRUE'
-      AND c2.type_terr IN ('жд');
-  ELSIF isbridge = 'Z' THEN
-    SELECT nvl(ROUND(SUM(SDO_GEOM.sdo_area(SDO_GEOM.sdo_intersection(c1.contour,c2.contour,0.001),0.001))/10000,2),0)
-      INTO sq
-      FROM ppo_contours c1 JOIN ref_terr_balance c2 ON SDO_FILTER(c2.contour,c1.contour) = 'TRUE'
-      WHERE c1.id = cntid AND sdo_geom.RELATE(c1.contour,'ANYINTERACT',c2.contour,0.001) = 'TRUE'
-      AND c2.type_terr IN ('нж', 'ж', 'д', 'п')
-      AND c2.type_terr_smeta = CASE WHEN ttype > 0 THEN ttype ELSE c2.type_terr_smeta END AND c2.cat_complexity = CASE WHEN ccomp > 0 THEN ccomp ELSE c2.cat_complexity END;
-  ELSIF isbridge = 'N' THEN
-    SELECT nvl(ROUND(SUM(SDO_GEOM.sdo_area(SDO_GEOM.sdo_intersection(c1.contour,c2.contour,0.001),0.001))/10000,2),0)
-      INTO sq
-      FROM ppo_contours c1 JOIN ref_terr_balance c2 ON SDO_FILTER(c2.contour,c1.contour) = 'TRUE'
-      WHERE c1.id = cntid AND sdo_geom.RELATE(c1.contour,'ANYINTERACT',c2.contour,0.001) = 'TRUE'
-      AND c2.type_terr IN ('г', 'р', 'рф')
-      AND c2.type_terr_smeta = CASE WHEN ttype > 0 THEN ttype ELSE c2.type_terr_smeta END AND c2.cat_complexity = CASE WHEN ccomp > 0 THEN ccomp ELSE c2.cat_complexity END;
-  ELSIF isbridge = 'N1' THEN
-    SELECT nvl(ROUND(SUM(SDO_GEOM.sdo_area(SDO_GEOM.sdo_intersection(c1.contour,c2.contour,0.001),0.001))/10000,2),0)
-      INTO sq
-      FROM ppo_contours c1 JOIN ref_terr_balance c2 ON SDO_FILTER(c2.contour,c1.contour) = 'TRUE'
-      WHERE c1.id = cntid AND sdo_geom.RELATE(c1.contour,'ANYINTERACT',c2.contour,0.001) = 'TRUE'
-      AND c2.type_terr IN ('р', 'рф')
-      AND c2.type_terr_smeta = CASE WHEN ttype > 0 THEN ttype ELSE c2.type_terr_smeta END AND c2.cat_complexity = CASE WHEN ccomp > 0 THEN ccomp ELSE c2.cat_complexity END;
-  ELSIF isbridge = 'LEP' THEN
-    SELECT nvl(ROUND(sum(SDO_GEOM.sdo_area(SDO_GEOM.sdo_intersection(SDO_GEOM.sdo_intersection(c1.contour,c2.contour,0.001),c3.contour,0.001),0.001))/10000,2),0)
-      INTO sq
-      FROM ppo.ppo_contours c1 JOIN ref_terr_balance c2 ON SDO_FILTER(c2.contour,c1.contour) = 'TRUE' JOIN ref_terr_balance c3 ON SDO_FILTER(c3.contour,c1.contour) = 'TRUE'
-      WHERE c1.id = cntID AND sdo_geom.RELATE(c1.contour,'ANYINTERACT',c2.contour,0.001) = 'TRUE'
-      AND sdo_geom.RELATE(c1.contour,'ANYINTERACT',c3.contour,0.001) = 'TRUE'
-      AND c2.type_terr IN ('нж', 'ж', 'п', 'д', 'г', 'р', 'рф') AND c3.type_terr = 'лэп'
-      AND c2.type_terr_smeta = ttype AND c2.cat_complexity = ccomp;
-  ELSIF isbridge = 'D' THEN
-    SELECT nvl(ROUND(sum(SDO_GEOM.sdo_area(SDO_GEOM.sdo_intersection(c1.contour,c2.contour,0.001),0.001))/10000,2),0)
-      INTO sq
-      FROM ppo.ppo_contours c1 JOIN ref_terr_balance c2 ON SDO_FILTER(c2.contour,c1.contour) = 'TRUE'
-      WHERE c1.id = cntID AND sdo_geom.RELATE(c1.contour,'ANYINTERACT',c2.contour,0.001) = 'TRUE'
-      AND c2.type_terr IN ('д')
-      AND c2.type_terr_smeta = CASE WHEN ttype > 0 THEN ttype ELSE c2.type_terr_smeta END AND c2.cat_complexity = CASE WHEN ccomp > 0 THEN ccomp ELSE c2.cat_complexity END;
-  END IF;
-  RETURN sq;
-EXCEPTION
-  WHEN OTHERS THEN RETURN 0;
-END;
+    res number(20);
+    meas PLS_INTEGER;
+    l_meas VARCHAR2(20);
+    l_vol NUMBER;
+    l_vol_fact NUMBER;
+    l_isw VARCHAR2(1);
+    cnt_dbl PLS_INTEGER := 0;
+    wid PLS_INTEGER;
+  BEGIN
+    BEGIN
+      SELECT id INTO wid FROM ppo_voldates WHERE ord_id = ORDID AND category = p_category AND kind = p_kind AND executor = p_executor;                          -- Проверяем наличие такой же работы в заказе.
+      IF nvl(p_no,0) > 0 AND (nvl(ater,'N') = 'Y' OR nvl(reg,'N') = 'Y') AND cnt_prev_ord = 0  THEN                                                             -- Проверяем, создан ли этап с тем же номером в заказе Новой Москвы,
+        SELECT count(id) INTO cnt_dbl FROM ppo_voldates WHERE no = p_no AND voldate_id = wid;                                                                   -- а также отсутствие параметра SURV_UND_PREV_ORD.
+        IF cnt_dbl > 0 THEN
+          RETURN 0;
+        ELSE
+          SELECT measure, volume, volume_fact,is_working INTO l_meas,l_vol,l_vol_fact,l_isw FROM ppo_voldates WHERE id = wid;
+          insert into ppo_voldates(voldate_type, voldate_id, no, done_no, are_id, value, value_fact, measure, volume, volume_fact, is_working, cancelled, multilines, in_doc, fkp_reestr)
+            VALUES('STG', wid, p_no, p_no, p_are, 0, 0, l_meas, l_vol, l_vol_fact, l_isw, 'N', 'N', 'N', 'N') returning id into res;
+          return res;
+        END IF;
+      ELSE
+        RETURN 0;
+      END IF;
+    EXCEPTION
+      WHEN NO_DATA_FOUND THEN                                                                                                                                   -- Если работы еще нет, создаем.
+        SELECT rv_abbreviation INTO meas FROM cg_ref_codes WHERE rv_domain = 'PPO MEASURE' AND rv_low_value = p_measure;                                        -- Определяется метод округления объема работы по единице измерения.
+        insert into ppo_voldates(voldate_type, ord_id, category, kind, executor, value, value_fact, measure, volume, volume_fact, is_working, cancelled, multilines, in_doc, fkp_reestr)
+          VALUES('WORK', ORDID, p_category, p_kind, p_executor, 0, 0, p_measure, case when p_kind = '985' then 0 when NVL(meas,0) = 0 then round(p_volume) else p_volume end, p_volume_fact, p_is_working, 'N', 'N', 'N', 'N')
+              returning id into res;
+        return res;
+    END;
+  END insert_work;
+  
+  
+    FUNCTION ppp_volume return number IS
+/*####################################################################################################################*/
+/* Функция расчёта объёма работы "ппп". Вынужден был отказаться от динамического расчёта по формулам из справочников
+/*
+Физлица                                     |                            Юрлица
+--------------------------------------------|--------------------------------------------------------------
+Характер строительства                Объем | Объём                      Кол-во согласований
+                                     работы     | заказа
+                                                        |               Незастроенная    Застроенная       для ГЗ
+                                            |                 территория          территория
+Для газификации                             |
+(ppo_areas.description like '%газ%')     1      |до 1 га          не менее 6     не менее 12     не менее 12
+                                            |от 1 до 5 га     не менее 10    не менее 15     не менее 15
+                                            |от 5 до 10 га    не менее 15    не менее 17     не менее 17
+                                            |от 10 до 30 га   не менее 23    не менее 27     не менее 30
+Не для газификации                          |от 30 до 60 га   не менее 27    не менее 32     не менее 40
+(ppo_areas.description not like '%газ%') 10 |от 60 до 90 га   не менее 32    не менее 37     не менее 45
+                                            |от 90 до 120 га  не менее 37    не менее 41         не менее 50
 
-используется для вычисления площади пересечения между контуром заказа и определенными типами территорий, учитывая категорию сложности и тип территории.
-ppo_contours и ref_terr_balance
+Работать должно так.
+
+если заказ ГЗ – берем  столбец 3 в зависимости от площади заказа;
+если не ГЗ и на территории заказа есть предприятие или застроенная тер-рия, то берем по 2 столбцу в зависимости от площади заказа;
+если не ГЗ и на территории заказа нет предприятия или застроенной тер-рии, то берем по 1 столбцу в зависимости от площади заказа.
+/*####################################################################################################################*/
+    etype VARCHAR2(1);
+    fs VARCHAR2(10);
+    l_ater VARCHAR2(1);
+    l_reg VARCHAR2(1);
+    pvol NUMBER;
+    l_cnt NUMBER;
+    psq NUMBER;
+  BEGIN
+    select e.ent_type, o.fin_source, o.att_terr, o.region, (select round(sum(square_gra/10000),2) from centroid_ppo where numberarea = o.id)
+      into etype, fs, l_ater, l_reg, pvol
+      from ppo_orders o left join ent_entities e on e.id = o.ent_id
+      where o.id = ordid;
+    IF NVL(l_ater,'N') = 'N' AND NVL(l_reg,'N') = 'N' THEN
+      RETURN 1;
+    END IF;
+    IF nvl(etype,'Ю') = 'Ф' THEN
+      SELECT COUNT(id) INTO l_cnt FROM ppo_areas WHERE ord_id = ORDID AND description LIKE '%газ%';
+      IF l_cnt > 0 THEN
+        RETURN 1;
+      ELSE
+        RETURN 10;
+      END IF;
+    END IF;
+    IF NVL(fs,'N') = 'гз' THEN
+      IF pvol <= 1 THEN RETURN 12;
+      ELSIF pvol <= 5 THEN RETURN 15;
+      ELSIF pvol <= 10 THEN RETURN 17;
+      ELSIF pvol <= 30 THEN RETURN 30;
+      ELSIF pvol <= 60 THEN RETURN 40;
+      ELSIF pvol <= 90 THEN RETURN 45;
+      ELSE RETURN 50;
+      END IF;
+    END IF;
+    SELECT SUM(square) INTO psq FROM ppo_smeta_terr WHERE terr_type IN (1,3);
+    IF psq > 0 THEN
+      IF pvol <= 1 THEN RETURN 12;
+      ELSIF pvol <= 5 THEN RETURN 15;
+      ELSIF pvol <= 10 THEN RETURN 17;
+      ELSIF pvol <= 30 THEN RETURN 27;
+      ELSIF pvol <= 60 THEN RETURN 32;
+      ELSIF pvol <= 90 THEN RETURN 37;
+      ELSE RETURN 41;
+      END IF;
+    END IF;
+    IF pvol <= 1 THEN RETURN 6;
+    ELSIF pvol <= 5 THEN RETURN 10;
+    ELSIF pvol <= 10 THEN RETURN 15;
+    ELSIF pvol <= 30 THEN RETURN 23;
+    ELSIF pvol <= 60 THEN RETURN 27;
+    ELSIF pvol <= 90 THEN RETURN 32;
+    ELSE RETURN 37;
+    END IF;
+  END ppp_volume;
 
 
     FUNCTION get_int_borders(text_int varchar2, border_no pls_integer) return number is
     begin
       return to_number(regexp_substr(text_int, '\d+(\.\d+){0,1}', 1, border_no),'FM99999D9','NLS_NUMERIC_CHARACTERS = ''.,''');
     end get_int_borders;
-    
-    принимает два параметра: text_int (строковое представление числовой последовательности) и border_no (номер границы), 
-    и возвращает число - значение указанной границы из числовой последовательности, извлеченной из строки text_int с использованием регулярного выражения.
-        
-        
-        FUNCTION get_int_sum(p_s NUMBER, p_bp PLS_INTEGER, out_cod OUT PLS_INTEGER) RETURN NUMBER IS
+
+    FUNCTION get_int_sum(p_s NUMBER, p_bp PLS_INTEGER, out_cod OUT PLS_INTEGER) RETURN NUMBER IS
       l_c NUMBER;
     BEGIN
       FOR rec_a IN (SELECT DISTINCT par_cod,bp_method FROM ref_base_price WHERE group_no = p_bp AND e_date IS NULL) LOOP
@@ -142,385 +138,289 @@ ppo_contours и ref_terr_balance
       END LOOP;
       RETURN 0;
     END get_int_sum;
-    осуществляет расчет суммы на основе входных данных, используя параметры и базовые цены из соответствующих таблиц, 
-    и возвращает результирующую сумму и код через выходной параметр.
-    ref_base_price и class_param_values
-    
-    
-  FUNCTION insert_smeta(p_vld_id number, p_type vc_list, p_no number, p_bp_id number, sq_type number, p_volume number, p_measure varchar2, p_size_type pls_integer, p_ki number,
-                         p_thin NUMBER := 0, p_accel number := 1, p_coeff_id n_list := null, p_real_value n_list := null, p_spec number := 0, p_coeff_add vc_list := null, p_stg_no varchar2 := null, p_accel_type VARCHAR2 := NULL,
-                         p_371 VARCHAR2 := NULL) RETURN PLS_INTEGER is
-/*####################################################################################################################*/
-/* Функция добавления сметы в работу. Содержит добавление заголовка сметы и набора коэффициентов, заданных для
-/* каждой работы в справочнике REF_WORK_CAT. Включает в себя процедуру пересчета сметы.
-/* Коэффициент "небольшие участки.." применяется к контурам заказа, а не к объему заказа в целом, и не к объему разделенных категорий.
-/* Например:
-/* 1. Заказ 4.50га с одним контуром. Тогда в заказе ко всем категориям необходимо применить коэфф. "небольшие участки от 1га до 5 га или узкие полосы до 70 м"
-/* 2. Заказ 4.50га, но там 2 контура: один 0.50га, второй 4 га. Тогда к категориям, которые определены в границах контура 0.50га, применяем коэфф. "небольшие
-/*    участки до 1га", а к категориям контура с площадью 4га - "небольшие участки от 1га до 5 га или узкие полосы до 70 м".
-/* 3. Заказ 10.00га состоит из 7 контуров: один 5.50га, второй 3га и 5 контуров общей площадью 1.90га (каждый из 5 контуров площадью до 1 га). Тогда
-/*    к категориям, определенным в контуре площадь 5.50га, мы не применяем коэффициент "небольшие участки…"; к категориям, определенным в контуре площадью 3га,
-/*    применяем коэфф. "небольшие участки от 1га до 5 га или узкие полосы до 70 м", а к категориям, определенным в остальных 5 контурах, применяем коэфф.
-/*    "небольшие участки до 1га"
-/* 4. Заказ 6.00га, но его часть состоит из узкой полосы шириной до 70 метров, тогда в категориях, попадающих в эту узкую полосу мы также должны брать коэфф.
-/*    "небольшие участки от 1га до 5 га или узкие полосы до 70 м", а его объем будет равен площади попадающей в узкую полосу категории
-/*####################################################################################################################*/
-    sh_id number(20);
-    cval NUMBER(6,3);
-    pvol NUMBER := p_volume;
-    is_65 PLS_INTEGER := 0;
-    meas PLS_INTEGER;
-    volume NUMBER(10,3);
-    cao NUMBER;
-    gd NUMBER;
-    dor NUMBER;
-    wname varchar2(10);
+
   BEGIN
-    for p in (select column_value st from table(p_type)) loop
-DBMS_OUTPUT.put_line('ppo_stages_id = '||p_vld_id||';smeta_type='||p.st||';smeta_no='||p_no||';smeta_volume='||p_volume||';thin='||p_thin||';bp='||p_bp_id);
-      SELECT rv_abbreviation INTO meas FROM cg_ref_codes WHERE rv_domain = 'PPO MEASURE' AND rv_low_value = p_measure;
-      IF nvl(meas,0) = 0 THEN
-        volume := ROUND(p_volume);
-      ELSE
-        volume := p_volume;
-      END IF;
-      IF nvl(p_stg_no,'0') != '0' THEN
-        SELECT kind INTO wname FROM ppo_voldates WHERE id = (SELECT voldate_id FROM ppo_voldates WHERE id = p_vld_id);
-      ELSE
-        SELECT kind INTO wname FROM ppo_voldates WHERE id = p_vld_id;
-      END IF;
-      insert into ppo_smeta_header_new(ppo_stages_id, smeta_type, smeta_no, bp_id, research_volume, k_infl, k_infl_percent, k_accel, accel_type, old_id)        -- Если указан параметр p_371 (техотчет или программа работ), и смета вставляется в этап,
-        VALUES (p_vld_id, p.st, p_no, p_bp_id, volume, p_ki, 100, p_accel, p_accel_type, CASE WHEN p_371 IS NOT NULL AND nvl(p_stg_no,'0') != '0' THEN '1,2' ELSE NULL END) returning id into sh_id;
-                                                                                                                                                                -- нужно заполнять поле OLD_ID значением "1,2", чтобы учесть в расчетах подеревную съемку.
-      FOR rec_coeff IN                                                                                                                                          -- Сметные коэффициенты, работа ведется с данными типа N_LIST и VC_LIST.
-      (
-      select sh_id, cf.v cfv, nvl(rv.v, (select coeff_value from ref_coeff where id = cf.v)) rvv
-      from (
-      select rownum rn, column_value v from table(nvl(p_coeff_id, n_list()))
-      UNION
-      select rownum rn, to_number(column_value) v from table(nvl(p_coeff_add, vc_list()))) cf
-      left outer join (select rownum rn, column_value v from table(nvl(p_real_value, n_list()))) rv using (rn)
-      where cf.v is not NULL
-      ) LOOP
-      pvol := volume;
+    SELECT id INTO curinf FROM ref_infl WHERE priority = 11 AND nvl(e_date,SYSDATE+1) > SYSDATE;                                                                -- для сметы ОПС берём инфляцию с приоритетом 11 !!!
 /*####################################################################################################################*/
-/* Обработка конкретных коэффициентов
+    FOR rec IN
+      (SELECT c.obj_size, r.base_group FROM cross_ops_com c, ref_com_bgroup r WHERE c.ord_id = ORDID AND nvl(c.rc_id,0) = nvl(r.rc_id,0) and nvl(c.cadd_id,0) = nvl(r.cadd_id,0) AND c.obj_size IS NOT NULL
+      UNION ALL
+      SELECT c.obj_size, NULL base_group FROM cross_ops_com c WHERE c.ord_id = ORDID AND c.rc_id IS NULL AND c.cadd_id IS NULL AND c.obj_size IS NOT NULL
+      ORDER BY base_group nulls LAST) LOOP
+      p_obj_size := rec.obj_size;
+      IF rec.base_group IS NOT NULL THEN                                                                                                                        -- линейный объект
+        p_bg := rec.base_group;
+        sum_length := sum_length + p_obj_size;
+        CASE p_bg
+          WHEN 573 THEN s := p_obj_size;
+          WHEN 574 THEN s := 2 * p_obj_size;
+          WHEN 575 THEN s := 3 * p_obj_size;
+          ELSE s := p_obj_size;
+        END CASE;
+        FOR rec2 IN (SELECT DISTINCT par_cod,bp_method FROM ref_base_price WHERE group_no = p_bg AND e_date IS NULL) LOOP
+          SELECT complex, name, department, measure INTO l_cat, l_kind, l_exec, l_measure FROM class_works WHERE base_group = p_bg AND e_date IS NULL;
+          IF rec2.bp_method = 'I' AND rec2.par_cod != 53 THEN
+            FOR rec3 IN (SELECT value_cod,value_text FROM class_param_values WHERE param_cod = rec2.par_cod AND value_cod IN (SELECT DISTINCT val_cod FROM ref_base_price WHERE group_no = p_bg)) LOOP
+              IF p_obj_size > get_int_borders(rec3.value_text,1) AND p_obj_size <= NVL(get_int_borders(rec3.value_text,2),1000000) THEN
+                old_vol := 0;
+                res := 0;
+                FOR rec4 IN (SELECT id FROM ppo_voldates WHERE ord_id = ORDID AND CATEGORY = l_cat AND kind = l_kind AND executor = l_exec) LOOP
+                  old_vol := old_vol + 1;
+                  res := rec4.id;
+                END LOOP;
+                IF old_vol = 0 THEN
+DBMS_OUTPUT.put_line('Линия. kind = '||l_kind||';volume='||p_obj_size||';new');
+                  insert into ppo_voldates (voldate_type, ord_id, category, kind, executor, value, value_fact, measure, volume, volume_fact, is_working, cancelled, multilines, in_doc, fkp_reestr)
+                    VALUES ('WORK', ORDID, l_cat, l_kind, l_exec, 0, 0, l_measure, 0, 0, 'Y', 'N', 'N', 'N', 'N')
+                    RETURNING id INTO res;
+                  last_smeta := 0;
+                ELSE
+                  SELECT NVL(MAX(smeta_no),0) INTO last_smeta FROM ppo_smeta_header_new WHERE ppo_stages_id = res;
+DBMS_OUTPUT.put_line('Линия. kind = '||l_kind||';volume='||p_obj_size||';id='||res);
+                END IF;
+                SELECT DISTINCT cod, base_price INTO scod, c1 FROM ref_base_price WHERE group_no = p_bg AND par_cod = rec2.par_cod AND val_cod = rec3.value_cod AND e_date IS NULL;
+                sid := insert_smeta(p_vld_id => res, p_type => vc_list('П'), p_no => last_smeta + 1, p_bp_id => scod, sq_type => null,
+                  p_volume => p_obj_size, p_measure => l_measure, p_size_type => 0, p_ki => curinf, p_thin => 0, p_accel => 1, p_coeff_id => n_list(269,270,271), p_stg_no => 0);
+                UPDATE ppo_voldates SET volume = volume + p_obj_size WHERE id = res;
 /*####################################################################################################################*/
-      CASE rec_coeff.cfv
-/*####################################################################################################################*/
-/* Составление инж.-топограф. плана в масштабе 1:200
-/*####################################################################################################################*/
-        WHEN 1 THEN
-          cval := 2;
-          pvol := NULL;
-/*####################################################################################################################*/
-/* Выполнение изысканий в условиях специального режима
-/*####################################################################################################################*/
-        WHEN -120 THEN                                                                                                                                          -- Отрицательные коды представляют коэффициенты, которые имеют
-          cval := 1.25;                                                                                                                                         -- уникальную систему расчета для определенных работ.
-          pvol := volume;
-        WHEN -12 THEN
-          IF nvl(conf,'N') = 'Y' THEN                                                                                                                           -- conf - признак секретности заказа, тянется из основной процедуры.
-            cval := 1.25;
-            pvol := volume;
-          ELSE
-            cval := 1;
+              END IF;
+            END LOOP;
           END IF;
-        WHEN 12 THEN
-          IF nvl(conf,'N') = 'Y' THEN
-            cval := 1.25;
-            pvol := volume;
-          ELSIF NVL(p_spec,0) > 0 AND NVL(volume,0) > 0 THEN
-            pvol := least(p_spec,volume);
-            cval := 1 + (1.25 - 1) * pvol/volume;
-          ELSE
-            cval := 1;
-          END IF;
-/*####################################################################################################################*/
-/* Выполнение работ с  использованием материалов ограниченного пользования
-/*####################################################################################################################*/
-        WHEN 54 THEN
-          IF nvl(conf,'N') = 'Y' THEN
-            cval := 1.1;
-          ELSE
-            cval := 1;
-          END IF;
-          pvol := NULL;
-/*####################################################################################################################*/
-/* Составление плана в цвете (красках)
-/*####################################################################################################################*/
-        WHEN -56 THEN
-          SELECT COUNT(id) INTO cnt FROM ppo_ord_attrs WHERE ord_id = ORDID AND NAME IN ('SURV_LGR','ARCH_LGR','ARCH2000_LGR','SIT_LGR');                                      -- Данные из таблицы атрибутов.
-          IF cnt > 0 AND /*(ko = 2 OR nvl(fsource,'N') = 'гз')*/ko_mrr = 2 THEN
-            cval := 1.1;
-          ELSE
-            cval := 1;
-          END IF;
-          pvol := NULL;
-        WHEN 56 THEN
-          IF /*ko = 2 OR nvl(fsource,'N') = 'гз'*/ko_mrr = 2 THEN
-            cval := rec_coeff.rvv;
-          ELSE
-            cval := 1;
-          END IF;
-          pvol := NULL;
-/*####################################################################################################################*/
-/* С применением компьютерных технологий
-/*####################################################################################################################*/
-        WHEN 57 THEN
-          IF /*ko = 2 OR nvl(fsource,'N') = 'гз'*/ko_mrr = 2 THEN
-            cval := rec_coeff.rvv;
-          ELSE
-            cval := 1;
-          END IF;
-          pvol := NULL;
-/*####################################################################################################################*/
-/* Подеревная съемка
-/*####################################################################################################################*/
-        WHEN 62 THEN
-          cval := rec_coeff.rvv;
-          pvol := NULL;
-/*####################################################################################################################*/
-/* По существующим материалам
-/*####################################################################################################################*/
-        WHEN 63 THEN
-          cval := rec_coeff.rvv;
-          pvol := NULL;
-/*####################################################################################################################*/
-/* Неполный состав работ
-/*####################################################################################################################*/
-        WHEN -64 THEN
-          IF NOT ko_mrr = 1 THEN
-            cval := 0.15;
-          ELSE
-            cval := 1;
-          END if;
-          pvol := NULL;
-        WHEN 64 THEN
-          IF NOT ko_mrr = 1 THEN
-            cval := rec_coeff.rvv;
-          ELSE
-            cval := 1;
-          END if;
-          pvol := NULL;
-/*####################################################################################################################*/
-/* Небольшие участки до 1 га
-/*####################################################################################################################*/
-        WHEN 65 THEN
-          IF ((p_size_type = 0 and volume < 1) OR p_size_type = 1) AND is_65 = 0 THEN                                                                           -- p_size_type - передаваемый из работы 101 и подобных параметр,
-            is_65 := 1;                                                                                                                                         -- описывающий характер территории в зависимости от контура заказа,
-            cval := 1.4;                                                                                                                                        -- 0 - любая территория.
-            pvol := volume;
-          ELSE
-            cval := 1;
-          END IF;
-/*####################################################################################################################*/
-/* Небольшие участки св.1 до 5 га или узкие полосы до 70 м.
-/*####################################################################################################################*/
-        WHEN 66 THEN
-          IF ((p_size_type = 0 AND volume >= 1 AND volume < 5) OR (p_size_type = 2 AND p_thin = 0)) AND is_65 = 0 THEN
-            cval := 1.2;
-            pvol := volume;
-            is_65 := 1;
-          ELSIF p_size_type = 2 AND p_thin > 0 AND is_65 = 0 THEN
-            pvol := least(p_thin,volume);
-            cval := 1 + (1.2 - 1) * pvol/volume;
-            is_65 := 1;
-          ELSE
-            cval := 1;
-          END IF;
-/*####################################################################################################################*/
-/* Небольшие участки до 10 га
-/*####################################################################################################################*/
-        WHEN 67 THEN                                                                                                                                            -- Следующие два коэффициента идентичны двум предыдущим, но границы территорий
-          IF ((p_size_type = 0 and volume < 10) OR p_size_type = 1) AND is_65 = 0 THEN                                                                          -- увеличены в 10 раз для масштаба 1:2000. Номера коэффициентов разные, поэтому
-            is_65 := 1;                                                                                                                                         -- переменные bound_1 и bound_2 можно не использовать.
-            cval := 1.4;
-            pvol := volume;
-          ELSE
-            cval := 1;
-          END IF;
-/*####################################################################################################################*/
-/* Небольшие участки св.10 до 50 га или узкие полосы до 150 м.
-/*####################################################################################################################*/
-        WHEN 68 THEN
-          IF ((p_size_type = 0 AND volume >= 10 AND volume < 50) OR (p_size_type = 2 AND p_thin = 0)) AND is_65 = 0 THEN
-            cval := 1.2;
-            pvol := volume;
-            is_65 := 1;
-          ELSIF p_size_type = 2 AND p_thin > 0 AND is_65 = 0 THEN
-            pvol := least(p_thin,volume);
-            cval := 1 + (1.2 - 1) * pvol/volume;
-            is_65 := 1;
-          ELSE
-            cval := 1;
-          END IF;
-/*####################################################################################################################*/
-/* Нанесение актуальных линий градостроительного регулирования
-/*####################################################################################################################*/
-        WHEN 73 THEN
-          SELECT COUNT(id) INTO cnt FROM ppo_ord_attrs WHERE ord_id = ORDID AND NAME IN ('SURV_LGR','ARCH_LGR','ARCH2000_LGR','SIT_LGR');
-          IF cnt > 0 THEN
-            cval := rec_coeff.rvv;
-          ELSE
-            cval := 1;
-          END IF;
-          pvol := NULL;
-/*####################################################################################################################*/
-/* Количество коммуникаций на участке свыше 10
-/*####################################################################################################################*/
-        WHEN 79 THEN
-          SELECT NVL(SUM(get_cont_part(ID,0,0,'C')),0),NVL(SUM(get_cont_part(ID,0,0,'G')),0) INTO cao,gd FROM ppo_contours WHERE ord_id = ORDID;                -- Объём пересечения с ЦАО и гидрографией.
-          IF p_no in (1,3) AND ((cao > 0 AND ko_mrr != 1) OR gd > 0) THEN
-            cval := 1.7;
-          ELSIF cao > 0 AND ko_mrr = 1 THEN
-            cval := 1;
-          ELSE
-            cval := 1;
-          END IF;
-/*####################################################################################################################*/
-/* Подеревная съемка на застроенной территории
-/*####################################################################################################################*/
-        WHEN 80 THEN
-          cval := rec_coeff.rvv;
-          pvol := NULL;
-/*####################################################################################################################*/
-/* Координирование углов всех кап. зданий, выходов подз. комм. и осн.надзем. сооруж.
-/*####################################################################################################################*/
-        WHEN 81 THEN
-          IF sq_type IN (1,3) THEN
-            cval := 1.25;
-          ELSE
-            cval := 1;
-          END IF;
-/*####################################################################################################################*/
-/* Выполнение высотной съемки камеральный
-/*####################################################################################################################*/
-        WHEN 101 THEN
-          SELECT COUNT(id) INTO cnt FROM ppo_ord_attrs WHERE ord_id = ORDID AND NAME = 'SURV_SAG_PL';
-          IF cnt > 0 THEN
-            cval := rec_coeff.rvv;
-          ELSE
-            cval := 1;
-          END IF;
-          pvol := NULL;
-/*####################################################################################################################*/
-/* Выполнение высотной съемки полевой
-/*####################################################################################################################*/
-        WHEN 121 THEN
-          SELECT COUNT(id) INTO cnt FROM ppo_ord_attrs WHERE ord_id = ORDID AND NAME = 'SURV_SAG_PL';
-          IF cnt > 0 THEN
-            cval := rec_coeff.rvv;
-          ELSE
-            cval := 1;
-          END IF;
-          pvol := NULL;
-/*####################################################################################################################*/
-/* Обновление планов
-/*####################################################################################################################*/
-        WHEN 132 THEN
-          cval := 0.5;
-          pvol := volume;
-/*####################################################################################################################*/
-/* Создание цифровой трехмерной модели местности (рельефа)
-/*####################################################################################################################*/
-        WHEN 155 THEN
-          cval := 2;
-/*####################################################################################################################*/
-/* Неполный состав работ (может быть 0.15)
-/*####################################################################################################################*/
-        WHEN -168 THEN
-          cval := 0.15;
-        WHEN 168 THEN
-          cval := 0.5;
-/*####################################################################################################################*/
-/* Проверка наличия и нанесение основных планировочных высотных (красных) отметок (изготовление копий исходных документов при их наличии и отражение информации в составе топографического плана)
-/*####################################################################################################################*/
-        WHEN 215 THEN
-          SELECT COUNT(id) INTO cnt FROM ppo_ord_attrs WHERE ord_id = ORDID AND NAME IN ('SURV_KO','ARCH_KO');
-          IF cnt > 0 THEN
-            cval := rec_coeff.rvv;
-          ELSE
-            cval := 1;
-          END IF;
-          pvol := NULL;
-/*####################################################################################################################*/
-/* Проверка наличия и нанесение перспективного поперечного профиля улицы (изготовление копий исходных документов при их наличии и отражение информации в составе топографического плана)
-/*####################################################################################################################*/
-        WHEN 216 THEN
-          SELECT COUNT(id) INTO cnt FROM ppo_ord_attrs WHERE ord_id = ORDID AND NAME in ('SURV_KO','ARCH_KO');
-          SELECT NVL(SUM(get_cont_part(ID,0,0,'D')),0) INTO dor FROM ppo_contours WHERE ord_id = ORDID;
-          IF cnt > 0 AND dor > 0 THEN
-            cval := rec_coeff.rvv;
-          ELSE
-            cval := 1;
-          END IF;
-          pvol := NULL;
-/*####################################################################################################################*/
-/* Съемка подз. коммуникаций трубокабелеискателем
-/*####################################################################################################################*/
-        WHEN 310 THEN
-          IF sq_type = 1 AND /*(ko = 2 OR nvl(fsource,'N') = 'гз')*/ko_mrr = 2 THEN
-            cval := 1.55;
-          ELSIF sq_type = 2 AND /*(ko = 2 OR nvl(fsource,'N') = 'гз')*/ko_mrr = 2 THEN
-            cval := 1.2;
-          ELSIF sq_type = 3 AND /*(ko = 2 OR nvl(fsource,'N') = 'гз')*/ko_mrr = 2 THEN
-            cval := 1.75;
-          ELSE
-            cval := 1;
-          END IF;
-/*####################################################################################################################*/
-/* Выполнение вертикальной высотной съемки на планах горизонтальной съемки
-/*####################################################################################################################*/
-        WHEN 322 THEN
-          cval := rec_coeff.rvv;
-          pvol := volume;
-/*####################################################################################################################*/
-/* Выпуск материалов в электронном виде
-/*####################################################################################################################*/
-        WHEN 323 THEN
-          SELECT COUNT(id) INTO cnt FROM ppo_ord_attrs WHERE ord_id = ORDID AND NAME = 'ADD_PAPER';
-          IF cnt = 0 AND nvl(conf,'N') = 'N' AND (wname != '785' OR (wname = '785' AND ko_mrr = 1)) THEN
-            cval := rec_coeff.rvv;
-          ELSE
-            cval := 1;
-          END IF;
-          pvol := NULL;
-        WHEN -327 THEN
-          cval := 0.999;
-          pvol := NULL;
-        WHEN 327 THEN
-          SELECT COUNT(id) INTO cnt FROM ppo_ord_attrs WHERE ord_id = ORDID AND NAME = 'ADD_PAPER';
-          IF cnt = 0 AND nvl(conf,'N') = 'N' THEN
-            cval := rec_coeff.rvv;
-          ELSE
-            cval := 1;
-          END IF;
-          pvol := NULL;
-/*####################################################################################################################*/
-/* Остальные коэффициенты
-/*####################################################################################################################*/
+        END LOOP;
+      ELSE                                                                                                                                                      -- площадной объект
+        SELECT complex, name, department, measure INTO l_cat, l_kind, l_exec, l_measure FROM class_works WHERE base_group = 577 AND e_date IS NULL;
+        old_vol := 0;
+        res := 0;
+        FOR rec4 IN (SELECT id FROM ppo_voldates WHERE ord_id = ORDID AND CATEGORY = l_cat AND kind = l_kind AND executor = l_exec ORDER BY id) LOOP
+          old_vol := old_vol + 1;
+          res := rec4.id;
+        END LOOP;
+        IF old_vol = 0 THEN
+DBMS_OUTPUT.put_line('Площадь. kind = '||l_kind||';volume='||p_obj_size||';new');
+          INSERT INTO ppo_voldates (voldate_type, ord_id, category, kind, executor, value, value_fact, measure, volume, volume_fact, is_working, cancelled, multilines, in_doc, fkp_reestr)
+            VALUES ('WORK', ORDID, l_cat, l_kind, l_exec, 0, 0, l_measure, 0, 0, 'Y', 'N', 'N', 'N', 'N')
+            RETURNING id INTO res;
+          last_smeta := 0;
         ELSE
-          cval := rec_coeff.rvv;
-      END CASE;
-/*####################################################################################################################*/
-      IF cval != 1 THEN
-        insert into ppo_smeta_new(ppo_smeta_id, square, coeff_id, real_value) VALUES (rec_coeff.sh_id, pvol,
-          CASE WHEN rec_coeff.cfv IN (-120) THEN 12 ELSE abs(rec_coeff.cfv) END, cval);                                                                         -- Непосредственная вставка коэффициента в смету.
-        pvol := volume;
+          SELECT NVL(MAX(smeta_no),0) INTO last_smeta FROM ppo_smeta_header_new WHERE ppo_stages_id = res;
+DBMS_OUTPUT.put_line('Площадь. kind = '||l_kind||';volume='||p_obj_size||';id='||res);
+        END IF;
+        c1 := get_int_sum(p_obj_size,577,scod);
+        sid := insert_smeta(p_vld_id => res, p_type => vc_list('П'), p_no => last_smeta + 1, p_bp_id => scod, sq_type => null,
+          p_volume => p_obj_size, p_measure => l_measure, p_size_type => 0, p_ki => curinf, p_thin => 0, p_accel => 1, p_coeff_id => n_list(269,270,271), p_stg_no => 0);
+        UPDATE ppo_voldates SET volume = volume + p_obj_size WHERE id = res;
       END IF;
+    END LOOP;
+/*####################################################################################################################*/
+    s := 0;
+    sum_length := 0;
+    FOR rec in (select SUM(c.obj_size) obj_size, r.base_group from cross_ops_com c, ref_com_bgroup r                                                            -- отдельно работа 1004 "Рассмотрение проектов стройгенпланов..."
+      WHERE c.ord_id = ORDID AND nvl(c.rc_id,0) = nvl(r.rc_id,0) and nvl(c.cadd_id,0) = nvl(r.cadd_id,0) AND c.obj_size IS NOT NULL
+      GROUP BY r.base_group) LOOP
+      p_bg := rec.base_group;
+      p_obj_size := rec.obj_size;
+      sum_length := sum_length + p_obj_size;
+      CASE p_bg
+        WHEN 573 THEN s := s + p_obj_size;
+        WHEN 574 THEN s := s + 2 * p_obj_size;
+        WHEN 575 THEN s := s + 3 * p_obj_size;
+        ELSE s := s + p_obj_size;
+      END CASE;
+    END LOOP;
+    IF sum_length > 0 THEN
+      sum_length := sum_length/10000;
+      s := s/10000;
+    END IF;
+    IF sum_length > 0 THEN
+      SELECT complex, name, department, measure INTO l_cat, l_kind, l_exec, l_measure FROM class_works WHERE base_group = 577 AND e_date IS NULL;
+      old_vol := 0;
+      res := 0;
+      FOR rec4 IN (SELECT id FROM ppo_voldates WHERE ord_id = ORDID AND CATEGORY = l_cat AND kind = l_kind AND executor = l_exec ORDER BY id) LOOP
+        old_vol := old_vol + 1;
+        res := rec4.id;
       END LOOP;
-      recalc(p_vld_id, sh_id, p_stg_no);                                                                                                                        -- Расчет и обновление стоимости.
-    end loop;
-    RETURN sh_id;
-  END insert_smeta;
-    
-    
-   ppo_smeta_header_new
-   cg_ref_codes
-   ref_coeff
-   ppo_voldates
-   ppo_ord_attrs
-   
-    
-    
+      IF old_vol = 0 THEN
+DBMS_OUTPUT.put_line('1004. kind = '||l_kind||';volume='||p_obj_size||';new');
+        insert into ppo_voldates (voldate_type, ord_id, category, kind, executor, value, value_fact, measure, volume, volume_fact, is_working, cancelled, multilines, in_doc, fkp_reestr)
+          VALUES ('WORK', ORDID, l_cat, l_kind, l_exec, 0, 0, l_measure, 0, 0, 'Y', 'N', 'N', 'N', 'N')
+          RETURNING id INTO res;
+        last_smeta := 0;
+      ELSE
+        SELECT NVL(MAX(smeta_no),0) INTO last_smeta FROM ppo_smeta_header_new WHERE ppo_stages_id = res;
+DBMS_OUTPUT.put_line('1004. kind = '||l_kind||';volume='||p_obj_size||';id='||res);
+      END IF;
+      c4 := get_int_sum(s,577,scod);
+      sid := insert_smeta(p_vld_id => res, p_type => vc_list('П'), p_no => last_smeta + 1, p_bp_id => scod, sq_type => null,
+        p_volume => sum_length, p_measure => l_measure, p_size_type => 0, p_ki => curinf, p_thin => 0, p_accel => 1, p_coeff_id => n_list(269,270,271), p_stg_no => 0);
+      UPDATE ppo_voldates SET volume = volume + sum_length WHERE id = res;
+    END IF;
+/*####################################################################################################################*/
+    s := 0;
+    sum_length := 0;
+    FOR rec in (select SUM(c.obj_size) obj_size, r.base_group from cross_ops_com c, ref_com_bgroup r                                                            -- отдельно работа 999 "Проверка участка..."
+      WHERE c.ord_id = ORDID AND nvl(c.rc_id,0) = nvl(r.rc_id,0) and nvl(c.cadd_id,0) = nvl(r.cadd_id,0) AND c.obj_size IS NOT NULL
+      GROUP BY r.base_group) LOOP
+      p_bg := rec.base_group;
+      p_obj_size := rec.obj_size;
+      sum_length := sum_length + p_obj_size;
+      CASE p_bg
+        WHEN 573 THEN s := s + p_obj_size;
+        WHEN 574 THEN s := s + 2 * p_obj_size;
+        WHEN 575 THEN s := s + 3 * p_obj_size;
+        ELSE s := s + p_obj_size;
+      END CASE;
+    END LOOP;
+    IF sum_length > 0 THEN
+      sum_length := sum_length/10000;
+      s := s/10000;
+    END IF;
+    FOR rec IN (SELECT SUM(obj_size) obj_size from cross_ops_com WHERE ord_id = ORDID AND rc_id IS NULL AND cadd_id IS NULL AND obj_size IS NOT NULL) LOOP
+      p_obj_size := rec.obj_size;
+      sum_length := sum_length + p_obj_size;
+      s := s + p_obj_size;
+    END LOOP;
+    IF sum_length > 0 THEN
+      SELECT complex, name, department, measure INTO l_cat, l_kind, l_exec, l_measure FROM class_works WHERE base_group = 572 AND e_date IS NULL;
+DBMS_OUTPUT.put_line('999. kind = '||l_kind||';volume='||sum_length||';new');
+      insert into ppo_voldates (voldate_type, ord_id, category, kind, executor, value, value_fact, measure, volume, volume_fact, is_working, cancelled, multilines, in_doc, fkp_reestr)
+        VALUES ('WORK', ORDID, l_cat, l_kind, l_exec, 0, 0, l_measure, sum_length, 0, 'Y', 'N', 'N', 'N', 'N')
+        RETURNING id INTO res;
+      c4 := get_int_sum(s,572,scod);
+      sid := insert_smeta(p_vld_id => res, p_type => vc_list('П'), p_no => 1, p_bp_id => scod, sq_type => null,
+        p_volume => sum_length, p_measure => l_measure, p_size_type => 0, p_ki => curinf, p_thin => 0, p_accel => 1, p_coeff_id => n_list(269,270,271), p_stg_no => 0);
+    END IF;
+/*####################################################################################################################*/
+    sum_length := 0;
+    FOR rec IN (SELECT SUM(dot_num) dot_num from cross_ops_com where ord_id = ORDID AND nvl(dot_num,0) > 0) LOOP                                                -- точечные объекты
+      p_dot_num := rec.dot_num;
+      sum_length := sum_length + p_dot_num;
+    END LOOP;
+    IF sum_length > 0 THEN
+      SELECT complex, name, department, measure INTO l_cat, l_kind, l_exec, l_measure FROM class_works WHERE base_group = 580 AND e_date IS NULL;
+DBMS_OUTPUT.put_line('dots. kind = '||l_kind||';volume='||sum_length||';new');
+      INSERT into ppo_voldates (voldate_type, ord_id, category, kind, executor, value, value_fact, measure, volume, volume_fact, is_working, cancelled, multilines, in_doc, fkp_reestr)
+        VALUES ('WORK', ORDID, l_cat, l_kind, l_exec, 0, 0, l_measure, sum_length, 0, 'Y', 'N', 'N', 'N', 'N')
+        RETURNING id INTO res;
+      SELECT DISTINCT cod, base_price INTO scod, c6 FROM ref_base_price WHERE group_no = 580 AND e_date IS NULL;
+      sid := insert_smeta(p_vld_id => res, p_type => vc_list('П'), p_no => 1, p_bp_id => scod, sq_type => null,
+        p_volume => sum_length, p_measure => l_measure, p_size_type => 0, p_ki => curinf, p_thin => 0, p_accel => 1, p_coeff_id => n_list(269,270,271), p_stg_no => 0);
+    END IF;
+/*####################################################################################################################*/
+    FOR rec IN (SELECT id FROM cross_ops_com c WHERE c.ord_id = ORDID) LOOP                                                                                     -- общие работы к любым объектам
+      SELECT complex, name, department, measure INTO l_cat, l_kind, l_exec, l_measure FROM class_works WHERE base_group = 581 AND e_date IS NULL;
+DBMS_OUTPUT.put_line('1008. kind = '||l_kind||';volume='||sum_length||';new');
+      INSERT INTO ppo_voldates (voldate_type, ord_id, category, kind, executor, value, value_fact, measure, volume, volume_fact, is_working, cancelled, multilines, in_doc, fkp_reestr)
+        VALUES ('WORK', ORDID, l_cat, l_kind, l_exec, 0, 0, l_measure, 1, 0, 'Y', 'N', 'N', 'N', 'N')
+        RETURNING id INTO res;
+      SELECT DISTINCT cod, base_price INTO scod, c2 FROM ref_base_price WHERE group_no = 581 AND e_date IS NULL;
+      sid := insert_smeta(p_vld_id => res, p_type => vc_list('П'), p_no => 1, p_bp_id => scod, sq_type => null,
+        p_volume => 1, p_measure => l_measure, p_size_type => 0, p_ki => curinf, p_thin => 0, p_accel => 1, p_coeff_id => NULL, p_stg_no => 0);
+/*####################################################################################################################*/
+      SELECT complex, name, department, measure INTO l_cat, l_kind, l_exec, l_measure FROM class_works WHERE base_group = 582 AND e_date IS NULL;
+DBMS_OUTPUT.put_line('1009. kind = '||l_kind||';volume='||sum_length||';new');
+      INSERT INTO ppo_voldates (voldate_type, ord_id, category, kind, executor, value, value_fact, measure, volume, volume_fact, is_working, cancelled, multilines, in_doc, fkp_reestr)
+        VALUES ('WORK', ORDID, l_cat, l_kind, l_exec, 0, 0, l_measure, 1, 0, 'Y', 'N', 'N', 'N', 'N')
+        RETURNING id INTO res;
+      SELECT DISTINCT cod, base_price INTO scod, c2 FROM ref_base_price WHERE group_no = 582 AND e_date IS NULL;
+      sid := insert_smeta(p_vld_id => res, p_type => vc_list('П'), p_no => 1, p_bp_id => scod, sq_type => null,
+        p_volume => 1, p_measure => l_measure, p_size_type => 0, p_ki => curinf, p_thin => 0, p_accel => 1, p_coeff_id => NULL, p_stg_no => 0);
+      EXIT;
+    END LOOP;
+  EXCEPTION
+    when others then
+      NULL;
+  END get_rc_price;
+  
+  
+  PROCEDURE make_smeta_complex (comp_in VARCHAR2 DEFAULT NULL) IS
+/*####################################################################################################################*/
+/* Создание сметы на комплекс
+/*####################################################################################################################*/
+    comp_id VARCHAR2(255);
+    l_orglik NUMBER := NULL;
+    l_period NUMBER := NULL;
+    l_ppercent NUMBER := NULL;
+    l_transport NUMBER := NULL;
+    l_payment NUMBER := NULL;
+    l_expense NUMBER := NULL;
+    dist NUMBER := NULL;
+    cyear VARCHAR2(4) := TO_CHAR(SYSDATE,'YYYY');
+    cmp_i PLS_INTEGER := 0;
+    sum_ord NUMBER := 0;
+    min_sum NUMBER := 16843;                                                                                                                                    -- "Минималььно допустимая" стоимость заказа
+    calc_err NUMBER;
+  BEGIN
+    IF comp_in IS NULL THEN
+      SELECT cw.complex INTO comp_id FROM class_works cw JOIN ref_work_cat rwc on cw.id = rwc.cw_id WHERE rwc.part = part_in AND rwc.priority = 1;              -- Вычисляем базовый комплекс работ
+    ELSE
+      comp_id := comp_in;
+    END IF;
+    IF (cnt_surv > 0 AND comp_in IS NULL) OR cnt_tree > 0 THEN                                                                                                  -- Если есть полевые работы, в расчет добавляются коэффициенты:
+      SELECT coeff_value INTO l_orglik FROM ref_coeff WHERE id = 69;                                                                                            -- Организации и ликвидации работ
+      IF /*ko = 2 OR nvl(fsource,'N') = 'гз'*/ko_mrr = 2 THEN
+        SELECT coeff_value INTO l_payment FROM ref_coeff WHERE id = 53;                                                                                         -- Без выплаты полевого довольствия
+      END IF;
+      SELECT coeff_value INTO l_transport FROM ref_coeff WHERE id = 14;                                                                                         -- Внутренний транспорт, исходя из
+      BEGIN
+        SELECT VALUE INTO dist FROM ppo_ord_attrs WHERE ord_id = ORDID AND NAME = 'ADD_OBJ_DISTANCE';                                                           -- расстояния до объекта
+      EXCEPTION
+        WHEN OTHERS THEN
+          dist := NULL;
+      END;
+      IF ko_mrr = 2 THEN
+        IF SYSDATE >= worktime.addworkdays(TO_DATE('20.10.'||cyear,'DD.MM.YYYY'),-5) OR SYSDATE < worktime.addworkdays(TO_DATE('05.05.'||cyear,'DD.MM.YYYY'),-5) THEN
+            SELECT coeff_value INTO l_period FROM ref_coeff WHERE id = 13;                                                                                      -- Неблагоприятный период года
+            l_ppercent := 100;
+        END IF;
+      ELSE
+        IF SYSDATE >= worktime.addworkdays(TO_DATE('20.10.'||cyear,'DD.MM.YYYY'),-5) OR SYSDATE < worktime.addworkdays(TO_DATE('31.03.'||cyear,'DD.MM.YYYY'),-5) THEN
+            l_period := 1.15;                                                                                                                                   -- Неблагоприятный период года
+            l_ppercent := 100;
+        END IF;
+      END IF;
+    END IF;
+    IF nvl(fsource,'N') != 'гз' THEN                                                                                                                            -- Непредвиденные расходы
+      IF ovol < 5 THEN
+        l_expense := 1.3;
+      ELSE
+        l_expense := 1.1;
+      END IF;
+    END IF;
+    FOR rec IN (                                                                                                                                                -- Здесь используется цикл для создания смет на каждый номер этапа
+      SELECT NO FROM ppo_voldates WHERE voldate_id IN (SELECT id FROM ppo_voldates WHERE ord_id = ORDID) GROUP BY NO                                            -- или на заказ целиком. Сметы предварительная и исполниительная.
+      UNION
+      SELECT NO FROM ppo_voldates WHERE ord_id = ORDID GROUP BY NO
+      ORDER BY NO nulls LAST
+    ) LOOP
+      cmp_i := cmp_i + 1;
+      IF cmp_i > 1 AND rec.NO IS NULL THEN EXIT; END IF;                                                                                                        -- Если сметы на этапы уже созданы, выходим, не создавая смету на заказ.
+      INSERT INTO ppo_smeta_new_complex (SMETA_TYPE, K_INFL_SEC, K_INFL_PERCENT, K_ACCEL, ACCEL_TYPE, K_INFL, COMPLEX_ID, ORD_ID, NO, K_ORGLIK, K_PERIOD, K_TRANSPORT, PERIOD_PERCENT, K_PAYMENT, DISTANCE, K_EXPENSE)
+        VALUES ('П', NULL, 100, curacc, acctype, curinf, comp_id, ORDID, rec.no,
+        CASE WHEN NVL(rec.NO,'0') = '2' THEN NULL ELSE l_orglik END,                                                                                            -- Общие полевые коэффициенты не добавляются во второй этап.
+        CASE WHEN NVL(rec.NO,'0') = '2' THEN NULL ELSE l_period END,                                                                                            -- Общие полевые коэффициенты не добавляются во второй этап.
+        CASE WHEN NVL(rec.NO,'0') = '2' THEN NULL ELSE l_transport END,                                                                                         -- Общие полевые коэффициенты не добавляются во второй этап.
+        CASE WHEN NVL(rec.NO,'0') = '2' THEN NULL ELSE l_ppercent END,                                                                                          -- Общие полевые коэффициенты не добавляются во второй этап.
+        CASE WHEN NVL(rec.NO,'0') = '2' THEN NULL ELSE l_payment END,                                                                                           -- Общие полевые коэффициенты не добавляются во второй этап.
+        CASE WHEN NVL(rec.NO,'0') = '2' THEN NULL ELSE dist END,                                                                                                -- Расстояние до объекта не добавляется во второй этап.
+        CASE WHEN NVL(rec.NO,'0') = '2' THEN l_expense ELSE NULL END);
+      calc_cost_real_new(ORDID, calc_err);                                                                                                                      -- Пришлось вставить между сметами расчет реальных стоимостей!
+      INSERT INTO ppo_smeta_new_complex (SMETA_TYPE, K_INFL_SEC, K_INFL_PERCENT, K_ACCEL, ACCEL_TYPE, K_INFL, COMPLEX_ID, ORD_ID, NO, K_ORGLIK, K_PERIOD, K_TRANSPORT, PERIOD_PERCENT, K_PAYMENT, DISTANCE, K_EXPENSE)
+        VALUES ('И', NULL, 100, curacc, acctype, curinf, comp_id, ORDID, rec.no,
+        CASE WHEN NVL(rec.NO,'0') = '2' THEN NULL ELSE l_orglik END,
+        CASE WHEN NVL(rec.NO,'0') = '2' THEN NULL ELSE l_period END,
+        CASE WHEN NVL(rec.NO,'0') = '2' THEN NULL ELSE l_transport END,
+        CASE WHEN NVL(rec.NO,'0') = '2' THEN NULL ELSE l_ppercent END,
+        CASE WHEN NVL(rec.NO,'0') = '2' THEN NULL ELSE l_payment END,
+        CASE WHEN NVL(rec.NO,'0') = '2' THEN NULL ELSE dist END,
+        CASE WHEN NVL(rec.NO,'0') = '2' THEN l_expense ELSE NULL END);                                                                                          -- Непредвиденные расходы добавляются только во второй этап.
+    END LOOP;
+    IF nvl(fsource,'N') != 'гз' AND cnt_surv > 0 AND oscale in ('1','2') THEN                                                                                   -- Для 200-ки и 500-ки не по Госзаданию и при наличии полевых работ следует проверять конечную стоимость
+      SELECT SUM(VALUE) INTO sum_ord FROM ppo_smeta_new_complex WHERE ord_id = ORDID AND complex_id = comp_id AND smeta_type = 'П';                             -- заказа (с учетом всех коэффициентов, но без учета НДС) и, если стоимость менее min_sum, требуется применить
+      IF sum_ord < min_sum THEN                                                                                                                                 -- дополнительный к-т для увеличения стоимости заказа до этой суммы и сохранить это значение в поле "договорной к-т".
+        UPDATE ppo_smeta_new_complex SET k_accel = ROUND(NVL(k_accel,1) * (min_sum / NVL(sum_ord,1)),4) WHERE ord_id = ORDID AND complex_id = comp_id;          -- Значение к-та рассчитывается по формуле k_accel=min_sum/Стоимость заказа.
+      END IF;                                                                                                                                                   -- Если значение k_accel до пересчета уже было заполнено, то значения старого к-та и нового
+    END IF;                                                                                                                                                     -- перемножаются  и сохраняется пересчитанное значение.
+    calc_cost_real_new(ORDID, calc_err);
+  END make_smeta_complex;
+  
+  
