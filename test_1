@@ -1,20 +1,16 @@
-PROCEDURE add_3_otd_prd (vd_in pls_integer) IS
+PROCEDURE add_3_s_prd (vd_in pls_integer) IS
 vtype varchar2(4);
 vid pls_integer;
 oid pls_integer;
-is_wrk pls_integer;
-is_wrk1 pls_integer;
-is_wrk2 pls_integer;
-is_wrk3 pls_integer;
-is_wrk4 pls_integer;
-is_wrk5 pls_integer;
-is_5 pls_integer;
-is_do pls_integer;
-is_785 pls_integer;
-is_371 pls_integer;
-is_926 pls_integer;
-is_kl PLS_INTEGER;
-is_stg pls_integer;
+is3s varchar2(255);
+is_112 pls_integer;
+is_808 pls_integer;
+is_kl pls_integer;
+is_132 pls_integer;
+is_416 pls_integer;
+is_417 pls_integer;
+is_413 pls_integer;
+is_838 PLS_INTEGER;
 vvol_153 number;
 vvol number;
 ovol number;
@@ -30,34 +26,190 @@ aper_100 date;
 sdate_210668 date;
 edate_210668 date;
 aper_210668 date;
-sdate_210668w date;
-edate_210668w date;
-aper_210668w date;
 ater varchar2(1);
 reg varchar2(1);
-edate_371 date;
-aper_371 date;
+mes varchar2(50);
+BEGIN
+    vd := vd_in;
+    SELECT voldate_type into vtype from ppo_voldates where id = vd_in;
+    IF vtype = 'STG' then
+        SELECT s.voldate_id, w.ord_id, s.volume, s.s_date, s.e_date, s.accel_per, s.measure
+            into vid, oid, vvol, sdate, edate, aper, mes
+            from ppo_voldates s, ppo_voldates w where s.id = vd_in and w.id = s.voldate_id;
+    ELSE
+        SELECT ord_id, volume, s_date, e_date, accel_per, measure
+            into oid, vvol, sdate, edate, aper, mes
+            from ppo_voldates where id = vd_in;
+        vid := vd_in;
+    END if;
+    select round(sum(square_gra)/10000,2) into ovol from centroid_ppo where numberarea = oid;
+    select no,confident,att_terr,region into is3s,is_sec,ater,reg from ppo_orders where id = oid;
+    select count(id) into is_112 from ppo_voldates where ((kind in ('112') and executor = 200339) or kind = '966') and ord_id = oid;
+    select count(id) into is_808 from ppo_voldates where kind in ('808','838') and executor = 200339 and ord_id = oid;
+    select count(id) into is_kl from ppo_voldates where kind in ('кл','967') and executor = 200339 and ord_id = oid;
+    select count(id) into is_132 from ppo_voldates where kind in ('132') and executor = 200339 and ord_id = oid;
+    select count(id) into is_416 from ppo_voldates where kind in ('416','506','507','508','509') and executor = 200339 and ord_id = oid;
+    select count(id) into is_417 from ppo_voldates where kind in ('417','452') and executor = 200339 and ord_id = oid;
+    select count(id) into is_413 from ppo_voldates where kind in ('413','414','415') and executor = 200339 and ord_id = oid;
+    select count(id) into is_838 from ppo_voldates where kind in ('838') /*and executor = 200349*/ and ord_id = oid;
+    if is_112 > 0 and is_808 = 0 then
+        auto_prd_rec_ugp ('КТ', 198, 200587, 'га', vvol, sdate, edate);
+        auto_prd_rec_ugp ('ККТ', 119, 200582, 'га', vvol, sdate, edate);
+        auto_prd_rec_ugp ('КП', 194, 200587, 'га', vvol, sdate, edate);
+        auto_prd_rec_ugp ('ККП', 116, 200582, 'га', vvol, sdate, edate);
+        IF is_kl > 0 then
+            auto_prd_rec_ugp ('КЛ', 129, 202201, 'га', vvol, sdate, edate);
+        end if;
+        auto_prd_rec_ugp ('ВВ', 333, 805883, 'га', vvol, sdate, edate);
+        auto_prd_rec_ugp ('ВВ', 210, 805883, 'га', vvol, sdate, edate);
+        if is_sec = 'Y' then
+            auto_prd_rec_ugp ('ВВ', 67, 225821, 'га', vvol, sdate, edate);
+        else
+            auto_prd_rec_ugp ('ВВ', 67, 805883, 'га', vvol, sdate, edate);
+        end if;
+        IF is3s not like '3с%' then
+            auto_prd_rec_ugp ('ОП', 445, 21428116/*805883*/, 'га', vvol, sdate, edate);
+        else
+            auto_prd_rec_ugp ('ОП', 23, 4889921);
+            auto_prd_rec_ugp ('ОП', 22, 4889921);
+        end if;
+    elsif is_112 > 0 and is_808 > 0 and is3s not like '3с%' then
+        auto_prd_rec_ugp ('КТ', 198, 200587, 'га', vvol, sdate, edate);
+        auto_prd_rec_ugp ('ККТ', 119, 200582, 'га', vvol, sdate, edate);
+        auto_prd_rec_ugp ('КП', 194, 200587, 'га', vvol, sdate, edate);
+        auto_prd_rec_ugp ('ККП', 116, 200582, 'га', vvol, sdate, edate);
+        IF is_kl > 0 then
+            auto_prd_rec_ugp ('КЛ', 129, 202201, 'га', vvol, sdate, edate);
+        end if;
+        auto_prd_rec_ugp ('ВВ', 333, 805883, 'га', vvol, sdate, edate);
+        auto_prd_rec_ugp ('ВВ', 210, 805883, 'га', vvol, sdate, edate);
+        auto_prd_rec_ugp ('ОП', 240, 805883, 'га', vvol, sdate, edate);
+        if is_sec = 'Y' then
+            auto_prd_rec_ugp ('ВВ', 67, 225821, 'га', vvol, sdate, edate);
+        else
+            auto_prd_rec_ugp ('ВВ', 67, 805883, 'га', vvol, sdate, edate);
+        end if;
+        auto_prd_rec_ugp ('ОП', 445, 21428116/*207342*/, 'га', vvol, sdate, edate);
+    ELSIF is_132 > 0 and is_112 = 0 and is_808 = 0 and is_kl = 0 and is3s like '3с%' then
+        auto_prd_rec_ugp ('КП', 194, 200587, 'га', vvol, sdate, edate);
+        auto_prd_rec_ugp ('ККП', 116, 200582, 'га', vvol, sdate, edate);
+        auto_prd_rec_ugp ('ВВ', 333, 805883, 'га', vvol, sdate, edate);
+        if is_sec = 'Y' then
+            auto_prd_rec_ugp ('ВВ', 67, 225821, 'га', vvol, sdate, edate);
+        else
+            auto_prd_rec_ugp ('ВВ', 67, 805883, 'га', vvol, sdate, edate);
+        end if;
+        auto_prd_rec_ugp ('ОП', 23, 4889921);
+        auto_prd_rec_ugp ('ОП', 22, 4889921);
+    ELSIF is_416 > 0 and is_112 = 0 and is3s like '3с%' then
+        auto_prd_rec_ugp ('ВВ', 210, 805883, mes, vvol);
+        auto_prd_rec_ugp ('ОП', 23, 4889921);
+        auto_prd_rec_ugp ('ОП', 22, 4889921);
+    ELSIF is_417 > 0 and is_112 = 0 and is3s like '3с%' then
+        if is_sec = 'Y' then
+            auto_prd_rec_ugp ('ВВ', 67, 225821, mes, vvol);
+        else
+            auto_prd_rec_ugp ('ВВ', 67, 805883, mes, vvol);
+        end if;
+        auto_prd_rec_ugp ('ОП', 23, 4889921);
+        auto_prd_rec_ugp ('ОП', 22, 4889921);
+    ELSIF is_413 > 0 and is_112 = 0 and is3s like '3с%' then
+        auto_prd_rec_ugp ('ОП', 23, 4889921);
+        auto_prd_rec_ugp ('ОП', 22, 4889921);
+    end if;
+    IF is_112 > 0 OR is_132 > 0 THEN
+        auto_prd_rec_ugp ('КП', 400, 200582, 'га', vvol);
+        IF is_838 > 0 OR is_808 > 0 THEN
+            auto_prd_rec_ugp ('ДО', 61, 207342, 'га', vvol, sdate, edate);
+        END IF;
+    END IF;
+END;
+
+
+
+PROCEDURE add_3_s_prd_list (ord_in varchar2) IS
+vvol number;
+sdate date;
+edate date;
+cnt NUMBER;
+BEGIN
+    FOR rec IN (SELECT w.id, w.ord_id FROM ppo_voldates w, table(str2table(ord_in,',')) t WHERE w.kind IN ('966','112') AND w.executor = 200339 AND w.ord_id = t.column_value) LOOP
+      vd := rec.id;
+      SELECT volume,e_date into vvol,edate from ppo_voldates where id = rec.id;
+      select duty_date into sdate from ppo_orders where id = rec.ord_id;
+      auto_prd_rec_ugp ('КТ', 198, 200587, 'га', vvol, sdate, edate);
+      auto_prd_rec_ugp ('КЛ', 285, 202201, 'га', vvol, sdate, edate);
+      auto_prd_rec_ugp ('ККТ', 119, 200582, 'га', vvol, sdate, edate);
+      auto_prd_rec_ugp ('КП', 194, 200587, 'га', vvol, sdate, edate);
+      auto_prd_rec_ugp ('ККП', 116, 200582, 'га', vvol, sdate, edate);
+      auto_prd_rec_ugp ('КП', 400, 200582, 'га', vvol, sdate, edate);
+      auto_prd_rec_ugp ('ВВ', 333, 805883, 'га', vvol, sdate, edate);
+      SELECT COUNT(id) INTO cnt FROM ppo_voldates WHERE ord_id = rec.ord_id AND kind = 'кл';
+      IF cnt > 0 THEN
+        auto_prd_rec_ugp ('КЛ', 129, 202201, 'га', vvol, sdate, edate);
+      END IF;
+      auto_prd_rec_ugp ('ВВ', 210, 805883, 'га', vvol, sdate, edate);
+      auto_prd_rec_ugp ('ВВ', 67, 805883, 'га', vvol, sdate, edate);
+      auto_prd_rec_ugp ('ОП', 445, 21428116, 'га', vvol, sdate, edate);
+      SELECT COUNT(id) INTO cnt FROM ppo_voldates WHERE ord_id = rec.ord_id AND kind IN ('808','838');
+      IF cnt > 0 THEN
+        auto_prd_rec_ugp ('ДО', 61, 207342, 'га', vvol, sdate, edate);
+      END IF;
+   END LOOP;
+END;
+
+PROCEDURE ADD_O10_PRD (vd_in pls_integer) IS
+vtype varchar2(4);
+vid pls_integer;
+oid pls_integer;
+vvol_153 number;
+vvol number;
+ovol number;
+is_sec varchar2(1);
+is3s varchar2(100);
+is_100 pls_integer;
+is_153 pls_integer;
+is_132 pls_integer;
+is_kl pls_integer;
+is_200 pls_integer;
+is_808 pls_integer;
+is_785 pls_integer;
+is_371 pls_integer;
+is_100_1 pls_integer;
+is_371_1 pls_integer;
+is_1088 PLS_INTEGER;
+is_877 PLS_INTEGER;
+sdate date;
+edate date;
+aper date;
+ater varchar2(1);
+reg varchar2(1);
+mes varchar2(50);
 sd_134st2 date;
 ed_134st2 date;
 aper_134st2 date;
 sd_856st2 date;
 ed_856st2 date;
 aper_856st2 date;
+edate_207 date;
+aper_207 date;
+sdate_210668 date;
+edate_210668 date;
+aper_210668 date;
+sdate_210668w date;
+edate_210668w date;
+aper_210668w date;
+edate_371 date;
+aper_371 date;
+is_stg pls_integer;
 roid pls_integer;
 reid pls_integer;
-s1_cnt NUMBER;
-fs VARCHAR2(10);
-duty_d date;
-is_brd PLS_INTEGER;
-is_ngu pls_integer;
-ngu_vol NUMBER;
-cnt_877 NUMBER;
 BEGIN
     vd := vd_in;
     SELECT voldate_type into vtype from ppo_voldates where id = vd_in;
     if vtype = 'STG' then
-        SELECT s.voldate_id, w.ord_id, s.volume, s.s_date, s.e_date, s.accel_per
-            into vid, oid, vvol, sdate, edate, aper
+        SELECT s.voldate_id, w.ord_id, s.volume, s.s_date, s.e_date, s.accel_per, s.measure
+            into vid, oid, vvol, sdate, edate, aper, mes
             from ppo_voldates s, ppo_voldates w where s.id = vd_in and w.id = s.voldate_id;
         BEGIN
             select s.s_date,s.e_date,s.accel_per
@@ -69,56 +221,49 @@ BEGIN
                null;
         END;
         BEGIN
-            SELECT s.s_date,s.e_date,s.accel_per
+            select s.s_date,s.e_date,s.accel_per
                into sd_856st2,ed_856st2,aper_856st2
-               from ppo_voldates s,ppo_voldates w
-               where w.ord_id = oid and w.kind = '856' and w.id = s.voldate_id and s.no = '2';
+                from ppo_voldates s,ppo_voldates w
+                WHERE w.ord_id = oid and w.kind = '856' and w.id = s.voldate_id and s.no = '2';
         EXCEPTION
             when others then
                null;
         END;
     ELSE
-        SELECT ord_id, volume, s_date, e_date, accel_per
-            INTO oid, vvol, sdate, edate, aper
-            FROM ppo_voldates where id = vd_in;
+        SELECT ord_id, volume, s_date, e_date, accel_per, measure
+            into oid, vvol, sdate, edate, aper, mes
+            from ppo_voldates where id = vd_in;
         vid := vd_in;
-    END if;
+    end if;
     select round(sum(square_gra)/10000,2) into ovol from centroid_ppo where numberarea = oid;
-    select confident,att_terr,region,fin_source,duty_date into is_sec,ater,reg,fs,duty_d from ppo_orders where id = oid;
-    select count(id) into is_5 from ppo_voldates where kind in ('105') and /*executor = 200339 and*/ ord_id = oid;
-    select count(id) into is_wrk from ppo_voldates where kind in ('100','101') and /*executor = 200339 and*/ ord_id = oid;
-    select count(id) into is_kl from ppo_voldates where kind in ('200','967') and /*executor = 200339 and*/ ord_id = oid;
-    select count(id) into cnt_877 from ppo_voldates where kind in ('877') and /*executor = 200339 and*/ ord_id = oid;
-    if is_wrk > 0 then
-        begin
-            select e_date, accel_per into edate_100, aper_100 from ppo_voldates where kind in ('100','101') and /*executor = 200339 and*/ ord_id = oid;
-        exception
-            when others then
-                edate_100 := null;
-                aper_100 := null;
-        end;
-        SELECT COUNT(id) INTO s1_cnt FROM ppo_voldates WHERE NO = '1' AND voldate_id IN (SELECT id FROM ppo_voldates WHERE ord_id = oid);
+    select no,confident,att_terr,region into is3s,is_sec,ater,reg from ppo_orders where id = oid;
+    select count(id) into is_100 from ppo_voldates where kind in ('101') /*and executor in (201086,548281)*/ and ord_id = oid;
+    select count(id) into is_153 from ppo_voldates where kind in ('153') /*and executor in (201086,548281)*/ and ord_id = oid;
+    select sum(volume) into vvol_153 from ppo_voldates where kind in ('153','152') /*and executor in (201086,548281)*/ and ord_id = oid;
+    select count(id) into is_371 from ppo_voldates where kind in ('371') /*and executor in (201086,548281)*/ and ord_id = oid;
+    if is_371 > 0 then
+        for rec371 in (select e_date, accel_per from ppo_voldates where kind in ('371') and ord_id = oid order by nvl(e_date_fact,accel_per) desc) loop
+            edate_371 := rec371.e_date;
+            aper_371 := rec371.accel_per;
+            exit;
+        end loop;
+        select count(id) into is_stg from ppo_voldates where voldate_id in
+            (select id from ppo_voldates where ord_id = oid);
     end if;
-    select count(id) into is_do from ppo_voldates where kind in ('808','207','215') and /*executor = 200339 and*/ ord_id = oid;
-    if is_do > 0 then
-        begin
-            select e_date, accel_per into edate_207, aper_207 from ppo_voldates where kind in ('808','207','215') and /*executor = 200339 and*/ ord_id = oid;
-        exception
-            when others then
-                edate_207 := null;
-                aper_207 := null;
-        end;
-    end if;
+    select count(id) into is_1088 from ppo_voldates where kind in ('1088') /*and executor in (201086,548281)*/ and ord_id = oid;
+    select count(id) into is_877 from ppo_voldates where kind in ('877') /*and executor in (201086,548281)*/ and ord_id = oid;
+    select count(id) into is_100_1 from ppo_voldates where kind in ('100','101','105') /*and executor in (201086,548281)*/ and ord_id = oid;
+    select count(id) into is_kl from ppo_voldates where kind in ('кл','кл1') /*and executor in (201086,548281)*/ and ord_id = oid;
     begin
-        select s_date, e_date, accel_per into sdate_210668, edate_210668, aper_210668 from ppo_voldates where kind in ('132','159','421') and /*executor = 200339 and*/ ord_id = oid;
+        select s_date, e_date, accel_per into sdate_210668, edate_210668, aper_210668 from ppo_voldates where kind in ('132','159','421') /*and executor in (201086,548281)*/ and ord_id = oid;
     exception
         when no_data_found then
             sdate_210668 := null;
             edate_210668 := null;
             aper_210668 := null;
         when too_many_rows then
---          for rec132 in (select s_date, e_date, accel_per from ppo_voldates where kind in ('132','159','421') and executor = 200347 and ord_id = oid order by nvl(e_date_fact,accel_per) desc) loop
-            for rec132 in (select id, s_date, e_date, accel_per from ppo_voldates where kind in ('132','159','421') and /*executor = 200339 and*/ ord_id = oid order by nvl(e_date_fact,accel_per) asc) loop
+            for rec132 in (select id, s_date, e_date, accel_per from ppo_voldates where kind in ('132','159','421') /*and executor in (201086,548281)*/ and ord_id = oid
+                ORDER by nvl(e_date_fact,accel_per) asc) loop
                 for rec132_s in (select s_date,e_date,accel_per from ppo_voldates where voldate_id = rec132.id order by no) loop
                     sdate_210668 := rec132_s.s_date;
                     edate_210668 := rec132_s.e_date;
@@ -135,9 +280,22 @@ BEGIN
                 aper_210668 := aper_210668w;
             end if;
     end;
-    select count(id) into is_371 from ppo_voldates where kind in ('371') and ord_id = oid;
+    select count(id) into is_808 from ppo_voldates where kind in ('808','207','215') and ord_id = oid;
+    if is_808 > 0 then
+        BEGIN
+            select e_date, accel_per into edate_207, aper_207 from ppo_voldates where kind in ('808','207','215') and ord_id = oid;
+        exception
+            when others then
+                edate_207 := null;
+                aper_207 := null;
+        end;
+    end if;
+
+    select count(id) into is_132 from ppo_voldates where kind in ('132','159') /*and executor in (201086,548281)*/ and ord_id = oid;
+    select count(id) into is_200 from ppo_voldates where kind in ('200') /*and executor in (201086,548281)*/ and ord_id = oid;
+    select count(id) into is_785 from ppo_voldates where kind in ('785') /*and executor in (201086,548281)*/ and ord_id = oid;
     if is_371 > 0 then
-        for rec371 in (select e_date, accel_per from ppo_voldates where kind in ('371') and /*executor = 200339 and*/ ord_id = oid order by nvl(e_date_fact,accel_per) desc) loop
+        for rec371 in (select e_date, accel_per from ppo_voldates where kind in ('371') and ord_id = oid order by nvl(e_date_fact,accel_per) desc) loop
             edate_371 := rec371.e_date;
             aper_371 := rec371.accel_per;
             exit;
@@ -145,120 +303,62 @@ BEGIN
         select count(id) into is_stg from ppo_voldates where voldate_id in
             (select id from ppo_voldates where ord_id = oid);
     end if;
-    if is_wrk > 0 then
-        auto_prd_rec_ugp ('ПТ', 235, 200374, 'га', ovol);
-        if sdate is not null and edate is not null then
-            IF aper is not null then
-                auto_prd_rec_ugp ('ПТ', 353, 201769, 'га', vvol,
-                    sdate, addworkdays(sdate, ceil(getworkdays(edate,sdate)/2)), addworkdays(sdate, ceil((getworkdays(aper,sdate)-1)/2)));
-            else
-                auto_prd_rec_ugp ('ПТ', 353, 201769, 'га', vvol, sdate, addworkdays(sdate, ceil(getworkdays(edate,sdate)/2)));
-            end if;
-        else
-            auto_prd_rec_ugp ('ПТ', 353, 201769, 'га', vvol);
-        end if;
-        IF sdate is not null and edate is not null then
-            if aper is not null then
-                auto_prd_rec_ugp ('ПТ', 274, 203500, 'га', vvol,
-                    sdate, addworkdays(sdate, ceil(getworkdays(edate,sdate)/2)), addworkdays(sdate, ceil((getworkdays(aper,sdate)-1)/2)));
-            else
-                auto_prd_rec_ugp ('ПТ', 274, 203500, 'га', vvol, sdate, addworkdays(sdate, ceil(getworkdays(edate,sdate)/2)));
-            end if;
-        else
-            auto_prd_rec_ugp ('ПТ', 274, 203500, 'га', vvol);
-        end if;
-        IF (is_wrk > 0 or is_5 > 0) and sdate is not null and edate is not null then
-            if aper is not null then
-                auto_prd_rec_ugp ('КТ', 198, 201773, 'га', ovol,
-                    addworkdays(addworkdays(sdate,1), ceil(getworkdays(edate,sdate)/2)),addworkdays(edate, -1),addworkdays(aper, -1));
-            else
-                auto_prd_rec_ugp ('КТ', 198, 201773, 'га', ovol,
-                    addworkdays(addworkdays(sdate,1), ceil(getworkdays(edate,sdate)/2)),addworkdays(edate, -1));
-            end if;
-        ELSIF   is_wrk = 0 and is_5 = 0 and sdate is not null and edate is not null then
-            if aper is not null then
-                auto_prd_rec_ugp ('КТ', 198, 201773, 'га', ovol, sdate, addworkdays(edate, -1), addworkdays(aper, -1));
-            else
-                auto_prd_rec_ugp ('КТ', 198, 201773, 'га', ovol, sdate, addworkdays(edate, -1));
-            end if;
-        ELSE
-            auto_prd_rec_ugp ('КТ', 198, 201773, 'га', ovol);
-        end if;
-        --ACDOG-678
-        if (is_wrk > 0 or is_5 > 0) and nvl(is_sec,'N')='N' then
-            auto_prd_rec_ugp ('ОТЧ', 238, 20552633, 'отчет');
-        end if;
-        IF sdate is not null and edate is not null then
-            if aper is not null then
-                auto_prd_rec_ugp ('ККТ', 119, 201780, 'га', ovol, edate, edate, aper);
-            else
-                auto_prd_rec_ugp ('ККТ', 119, 201780, 'га', ovol, edate, edate);
-            end if;
-        else
-            auto_prd_rec_ugp ('ККТ', 119, 201780, 'га', ovol);
-        end if;
-        IF vtype = 'STG' and (ater = 'Y' OR reg = 'Y') then
-            auto_prd_rec_ugp ('КР', 178, 201850, 'га', ovol, NULL, addworkdays(edate_371,-3), addworkdays(aper_371,-3));
-        else
-            IF edate_210668 is not null then
-                IF aper_210668 is not null then
-                    auto_prd_rec_ugp ('КР', 178, 201850, 'га', ovol, edate_210668, edate_210668, aper_210668);
-                else
-                    auto_prd_rec_ugp ('КР', 178, 201850, 'га', ovol, edate_210668, edate_210668, aper);
-                end if;
-            else
-                auto_prd_rec_ugp ('КР', 178, 201850, 'га', ovol);
-            end if;
-        end if;
-        IF edate_210668 is not null then
-            if nvl(ovol,0) >= 10 then
-                IF aper_210668 is not null then
-                    auto_prd_rec_ugp ('КП', 400, 201850, 'га', ovol, edate_210668, edate_210668, aper_210668);
-                else
-                    auto_prd_rec_ugp ('КП', 400, 201850, 'га', ovol, edate_210668, edate_210668, aper);
-                end if;
-            else
-                IF aper_210668 is not null then
-                    auto_prd_rec_ugp ('КП', 400, 201850, 'га', ovol, addworkdays(edate_210668,-1), addworkdays(edate_210668,-1), addworkdays(aper_210668,-1));
-                else
-                    auto_prd_rec_ugp ('КП', 400, 201850, 'га', ovol, addworkdays(edate_210668,-1), addworkdays(edate_210668,-1), addworkdays(aper,-1));
-                end if;
-            end if;
-        else
-            auto_prd_rec_ugp ('КП', 400, 201850, 'га', ovol);
-        end if;
-        IF aper_100 is not null then
-            auto_prd_rec_ugp ('КП', 148, 201850, 'га', ovol, addworkdays(edate_100,2), addworkdays(edate_100,3), addworkdays(aper_100,3));
-        else
-            auto_prd_rec_ugp ('КП', 148, 201850, 'га', ovol, addworkdays(edate_100,2), addworkdays(edate_100,3));
-        end if;
-        if ater = 'Y' or reg = 'Y' then
-            IF vtype = 'STG' and nvl(ovol,0) <= 25 then
-                auto_prd_rec_ugp ('ККП', 301, 214622, 'га', ovol, edate_210668, addworkdays(edate_371,-6), addworkdays(aper_371,-6));
-            ELSIF vtype = 'STG' and nvl(ovol,0) > 25 then
-                auto_prd_rec_ugp ('ККП', 301, 214622, 'га', ovol, edate_210668, addworkdays(edate_371,-7), addworkdays(aper_371,-9));
-            end if;
-        end if;
-        IF vtype = 'STG' and sd_134st2 is not null then
-            if aper_134st2 is not null then
-                auto_prd_rec_ugp ('ВВ', 210, 200374, 'га', ovol, sd_134st2, ed_134st2, aper_134st2);
-            else
-                auto_prd_rec_ugp ('ВВ', 210, 200374, 'га', ovol, sd_134st2, ed_134st2);
-            end if;
-        else
-            if edate_210668 is not null then
-                IF aper_207 is null and aper_210668 is not null then
-                    auto_prd_rec_ugp ('ВВ', 210, 200374, 'га', ovol, addworkdays(edate_210668,1), addworkdays(edate_210668,1), aper_210668);
-                ELSIF aper_207 is not null and aper_210668 is not null and abs(getworkdays(aper_207,aper_210668)) <= 1 then
-                    auto_prd_rec_ugp ('ВВ', 210, 200374, 'га', ovol, addworkdays(edate_210668,1), addworkdays(edate_210668,1), aper_210668);
-                ELSIF aper_207 is not null and aper_210668 is not null and abs(getworkdays(aper_207,aper_210668)) > 1 then
-                    auto_prd_rec_ugp ('ВВ', 210, 200374, 'га', ovol, addworkdays(edate_210668,1), addworkdays(edate_210668,1), addworkdays(aper_210668,1));
-                else
-                    auto_prd_rec_ugp ('ВВ', 210, 200374, 'га', ovol, addworkdays(edate_210668,1), addworkdays(edate_210668,1));
-                END if;
-            ELSE
-                auto_prd_rec_ugp ('ВВ', 210, 200374, 'га', ovol);
-            END if;
-        end if;
+    select count(id) into is_371_1 from ppo_voldates where kind in ('371','926') /*and executor in (201086,548281)*/ and ord_id = oid;
 
-используется для автоматического создания и управления рядом операций (например, выбора, подсчета и определения дат) в рамках работ по обработке заказа в базе данных.
+    if is_100 > 0 then
+        auto_prd_rec ('ЭОД', 1222067, 27401177);
+        auto_prd_rec ('ЭОД', 1222076, 27401177);
+        IF sdate is not null and edate is not null then
+            if aper is not null then
+                auto_prd_rec ('КЛ',  1294512, 203397, 'га', 0, sdate, addworkdays(edate, 5), addworkdays(aper, 5));
+            else
+                auto_prd_rec ('КЛ',  1294512, 203397, 'га', 0, sdate, addworkdays(edate, 5));
+            end if;
+        else
+            auto_prd_rec ('КЛ',  1294512, 203397, 'га');
+        end if;
+        auto_prd_rec ('ОП',  1162317, 25635238, 'программа');
+        IF sdate is not null and edate is not null then
+            if aper is not null then
+                auto_prd_rec ('КЛ',  1294513, 203397, 'га', 0, sdate, addworkdays(sdate, ceil(getworkdays(edate,sdate)/2)), addworkdays(sdate, ceil(getworkdays(aper,sdate)/2)));
+            else
+                auto_prd_rec ('КЛ',  1294513, 203397, 'га', 0, sdate, addworkdays(sdate, ceil(getworkdays(edate,sdate)/2)));
+            END IF;
+        ELSE
+            auto_prd_rec ('КЛ',  1294513, 203397, 'га');
+        END IF;
+        auto_prd_rec ('ПТ',  1294514, 24126405, 'га', 0, sdate, sdate);
+        IF sdate is not null and edate is not null then
+            if aper is not null then
+                auto_prd_rec ('ПТ',  1294515, 24126405, 'га', vvol, sdate, addworkdays(sdate, ceil(getworkdays(edate,sdate)/2)), addworkdays(sdate, ceil(getworkdays(aper,sdate)/2)));
+                auto_prd_rec ('ПТ',  1294519, 24126405, 'га', vvol, sdate, addworkdays(sdate, ceil(getworkdays(edate,sdate)/2)), addworkdays(sdate, ceil(getworkdays(aper,sdate)/2)));
+            else
+                auto_prd_rec ('ПТ',  1294515, 24126405, 'га', vvol, sdate, addworkdays(sdate, ceil(getworkdays(edate,sdate)/2)));
+                auto_prd_rec ('ПТ',  1294519, 24126405, 'га', vvol, sdate, addworkdays(sdate, ceil(getworkdays(edate,sdate)/2)));
+            END IF;
+        ELSE
+            auto_prd_rec ('ПТ',  1294515, 24126405, 'га', vvol);
+            auto_prd_rec ('ПТ',  1294519, 24126405, 'га', vvol);
+        END IF;
+        if is_100_1 > 0 then
+            if sdate is not null and edate is not null then
+                if aper is not null then
+                    auto_prd_rec ('КТ',  1294520, 24126405, 'га', 0, addworkdays(addworkdays(sdate,1), ceil(getworkdays(edate,sdate)/2)), addworkdays(edate, -1), addworkdays(aper, -1));
+                    auto_prd_rec ('КТ',  1294521, 24126405, 'га', 0, addworkdays(addworkdays(sdate,1), ceil(getworkdays(edate,sdate)/2)), addworkdays(edate, -1), addworkdays(aper, -1));
+                else
+                    auto_prd_rec ('КТ',  1294520, 24126405, 'га', 0, addworkdays(addworkdays(sdate,1), ceil(getworkdays(edate,sdate)/2)), addworkdays(edate, -1));
+                    auto_prd_rec ('КТ',  1294521, 24126405, 'га', 0, addworkdays(addworkdays(sdate,1), ceil(getworkdays(edate,sdate)/2)), addworkdays(edate, -1));
+                end if;
+            else
+                auto_prd_rec ('КТ',  1294520, 24126405, 'га');
+                auto_prd_rec ('КТ',  1294521, 24126405, 'га');
+            end if;
+        else
+            IF sdate is not null and edate is not null then
+                IF aper is not null then
+                    auto_prd_rec ('КТ',  1294520, 24126405, 'га', 0, sdate, addworkdays(edate, -1), addworkdays(aper, -1));
+                    auto_prd_rec ('КТ',  1294521, 24126405, 'га', 0, sdate, addworkdays(edate, -1), addworkdays(aper, -1));
+                else
+                    auto_prd_rec ('КТ',  1294520, 24126405, 'га', 0, sdate, addworkdays(edate, -1));
+                    auto_prd_rec ('КТ',  1294521, 24126405, 'га', 0, sdate, addworkdays(edate, -1));
+                end if;
