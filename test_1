@@ -1,121 +1,31 @@
-  FUNCTION insert_work(p_category varchar2, p_kind varchar2, p_executor number, p_measure varchar2, p_volume number, p_volume_fact number, p_is_working VARCHAR2, p_no VARCHAR2 DEFAULT NULL, p_are PLS_INTEGER DEFAULT NULL) return number is
+  PROCEDURE GET_RC_PRICE IS
 /*####################################################################################################################*/
-/* Функция добавления работы/этапа в заказ. Возвращает идентификатор работы/этапа.
+/* Создание работ для ОПС и расчет стоимости
 /*####################################################################################################################*/
-    res number(20);
-    meas PLS_INTEGER;
-    l_meas VARCHAR2(20);
-    l_vol NUMBER;
-    l_vol_fact NUMBER;
-    l_isw VARCHAR2(1);
-    cnt_dbl PLS_INTEGER := 0;
-    wid PLS_INTEGER;
-  BEGIN
-    BEGIN
-      SELECT id INTO wid FROM ppo_voldates WHERE ord_id = ORDID AND category = p_category AND kind = p_kind AND executor = p_executor;                          -- Проверяем наличие такой же работы в заказе.
-      IF nvl(p_no,0) > 0 AND (nvl(ater,'N') = 'Y' OR nvl(reg,'N') = 'Y') AND cnt_prev_ord = 0  THEN                                                             -- Проверяем, создан ли этап с тем же номером в заказе Новой Москвы,
-        SELECT count(id) INTO cnt_dbl FROM ppo_voldates WHERE no = p_no AND voldate_id = wid;                                                                   -- а также отсутствие параметра SURV_UND_PREV_ORD.
-        IF cnt_dbl > 0 THEN
-          RETURN 0;
-        ELSE
-          SELECT measure, volume, volume_fact,is_working INTO l_meas,l_vol,l_vol_fact,l_isw FROM ppo_voldates WHERE id = wid;
-          insert into ppo_voldates(voldate_type, voldate_id, no, done_no, are_id, value, value_fact, measure, volume, volume_fact, is_working, cancelled, multilines, in_doc, fkp_reestr)
-            VALUES('STG', wid, p_no, p_no, p_are, 0, 0, l_meas, l_vol, l_vol_fact, l_isw, 'N', 'N', 'N', 'N') returning id into res;
-          return res;
-        END IF;
-      ELSE
-        RETURN 0;
-      END IF;
-    EXCEPTION
-      WHEN NO_DATA_FOUND THEN                                                                                                                                   -- Если работы еще нет, создаем.
-        SELECT rv_abbreviation INTO meas FROM cg_ref_codes WHERE rv_domain = 'PPO MEASURE' AND rv_low_value = p_measure;                                        -- Определяется метод округления объема работы по единице измерения.
-        insert into ppo_voldates(voldate_type, ord_id, category, kind, executor, value, value_fact, measure, volume, volume_fact, is_working, cancelled, multilines, in_doc, fkp_reestr)
-          VALUES('WORK', ORDID, p_category, p_kind, p_executor, 0, 0, p_measure, case when p_kind = '985' then 0 when NVL(meas,0) = 0 then round(p_volume) else p_volume end, p_volume_fact, p_is_working, 'N', 'N', 'N', 'N')
-              returning id into res;
-        return res;
-    END;
-  END insert_work;
-  
-  
-    FUNCTION ppp_volume return number IS
-/*####################################################################################################################*/
-/* Функция расчёта объёма работы "ппп". Вынужден был отказаться от динамического расчёта по формулам из справочников
-/*
-Физлица                                     |                            Юрлица
---------------------------------------------|--------------------------------------------------------------
-Характер строительства                Объем | Объём                      Кол-во согласований
-                                     работы     | заказа
-                                                        |               Незастроенная    Застроенная       для ГЗ
-                                            |                 территория          территория
-Для газификации                             |
-(ppo_areas.description like '%газ%')     1      |до 1 га          не менее 6     не менее 12     не менее 12
-                                            |от 1 до 5 га     не менее 10    не менее 15     не менее 15
-                                            |от 5 до 10 га    не менее 15    не менее 17     не менее 17
-                                            |от 10 до 30 га   не менее 23    не менее 27     не менее 30
-Не для газификации                          |от 30 до 60 га   не менее 27    не менее 32     не менее 40
-(ppo_areas.description not like '%газ%') 10 |от 60 до 90 га   не менее 32    не менее 37     не менее 45
-                                            |от 90 до 120 га  не менее 37    не менее 41         не менее 50
-
-Работать должно так.
-
-если заказ ГЗ – берем  столбец 3 в зависимости от площади заказа;
-если не ГЗ и на территории заказа есть предприятие или застроенная тер-рия, то берем по 2 столбцу в зависимости от площади заказа;
-если не ГЗ и на территории заказа нет предприятия или застроенной тер-рии, то берем по 1 столбцу в зависимости от площади заказа.
-/*####################################################################################################################*/
-    etype VARCHAR2(1);
-    fs VARCHAR2(10);
-    l_ater VARCHAR2(1);
-    l_reg VARCHAR2(1);
-    pvol NUMBER;
-    l_cnt NUMBER;
-    psq NUMBER;
-  BEGIN
-    select e.ent_type, o.fin_source, o.att_terr, o.region, (select round(sum(square_gra/10000),2) from centroid_ppo where numberarea = o.id)
-      into etype, fs, l_ater, l_reg, pvol
-      from ppo_orders o left join ent_entities e on e.id = o.ent_id
-      where o.id = ordid;
-    IF NVL(l_ater,'N') = 'N' AND NVL(l_reg,'N') = 'N' THEN
-      RETURN 1;
-    END IF;
-    IF nvl(etype,'Ю') = 'Ф' THEN
-      SELECT COUNT(id) INTO l_cnt FROM ppo_areas WHERE ord_id = ORDID AND description LIKE '%газ%';
-      IF l_cnt > 0 THEN
-        RETURN 1;
-      ELSE
-        RETURN 10;
-      END IF;
-    END IF;
-    IF NVL(fs,'N') = 'гз' THEN
-      IF pvol <= 1 THEN RETURN 12;
-      ELSIF pvol <= 5 THEN RETURN 15;
-      ELSIF pvol <= 10 THEN RETURN 17;
-      ELSIF pvol <= 30 THEN RETURN 30;
-      ELSIF pvol <= 60 THEN RETURN 40;
-      ELSIF pvol <= 90 THEN RETURN 45;
-      ELSE RETURN 50;
-      END IF;
-    END IF;
-    SELECT SUM(square) INTO psq FROM ppo_smeta_terr WHERE terr_type IN (1,3);
-    IF psq > 0 THEN
-      IF pvol <= 1 THEN RETURN 12;
-      ELSIF pvol <= 5 THEN RETURN 15;
-      ELSIF pvol <= 10 THEN RETURN 17;
-      ELSIF pvol <= 30 THEN RETURN 27;
-      ELSIF pvol <= 60 THEN RETURN 32;
-      ELSIF pvol <= 90 THEN RETURN 37;
-      ELSE RETURN 41;
-      END IF;
-    END IF;
-    IF pvol <= 1 THEN RETURN 6;
-    ELSIF pvol <= 5 THEN RETURN 10;
-    ELSIF pvol <= 10 THEN RETURN 15;
-    ELSIF pvol <= 30 THEN RETURN 23;
-    ELSIF pvol <= 60 THEN RETURN 27;
-    ELSIF pvol <= 90 THEN RETURN 32;
-    ELSE RETURN 37;
-    END IF;
-  END ppp_volume;
-
+    s  NUMBER := 0;
+    sum_length NUMBER := 0;
+    c1 NUMBER := 0;
+    c2 NUMBER := 0;
+    c3 NUMBER := 0;
+    c4 NUMBER := 0;
+    c5 NUMBER := 0;
+    c6 NUMBER := 0;
+    k  NUMBER := 1;
+    l_cat VARCHAR2(10);
+    l_kind VARCHAR2(10);
+    l_exec PLS_INTEGER;
+    l_measure VARCHAR2(50);
+    curinf PLS_INTEGER;
+    scod PLS_INTEGER;
+    sid PLS_INTEGER;
+    res PLS_INTEGER;
+    sum_s NUMBER;
+    old_vol NUMBER;
+    time_start DATE := SYSDATE;
+    p_bg PLS_INTEGER;
+    p_obj_size NUMBER;
+    p_dot_num PLS_INTEGER;
+    last_smeta PLS_INTEGER;
 
     FUNCTION get_int_borders(text_int varchar2, border_no pls_integer) return number is
     begin
@@ -330,9 +240,9 @@ DBMS_OUTPUT.put_line('1009. kind = '||l_kind||';volume='||sum_length||';new');
     when others then
       NULL;
   END get_rc_price;
-  
-  
-  PROCEDURE make_smeta_complex (comp_in VARCHAR2 DEFAULT NULL) IS
+
+
+PROCEDURE make_smeta_complex (comp_in VARCHAR2 DEFAULT NULL) IS
 /*####################################################################################################################*/
 /* Создание сметы на комплекс
 /*####################################################################################################################*/
@@ -424,3 +334,252 @@ DBMS_OUTPUT.put_line('1009. kind = '||l_kind||';volume='||sum_length||';new');
   END make_smeta_complex;
   
   
+  PROCEDURE put_terr_comp_sq (ORDID PLS_INTEGER, part_in VARCHAR2 DEFAULT '0101') IS
+/*####################################################################################################################*/
+/* Заполнение временной таблицы PPO_SMETA_TERR матрицей площадей пересечений каждого контура заказа со всеми типами
+/* баланса территорий + спецрежимом + ЛЭП + дорогами + тонкими линиями + мостами + гидрографией + отдельно застроенной/
+/* незастроенной территориями.
+/*####################################################################################################################*/
+BEGIN
+  FOR rec0 IN (SELECT id, c_mslink, contour FROM ppo_contours WHERE ord_id = ORDID) LOOP
+    FOR rec1 IN (SELECT value_cod FROM class_param_values WHERE param_cod = '2' AND value_cod > 0) LOOP
+      FOR rec2 IN (SELECT value_cod FROM class_param_values WHERE param_cod = '1' AND value_cod BETWEEN 1 AND 3) LOOP
+        INSERT INTO ppo_smeta_terr (cnt_id, cnt_square, CATEGORY, terr_type, square, spec, lep, road, thin_stripe, bridges, bridges2, water, z, n, n1)
+          SELECT
+            rec0.id,
+            round(square_gra/10000,2),
+            rec2.value_cod,
+            rec1.value_cod,
+            get_cont_part(rec0.id, rec1.value_cod, rec2.value_cod),
+            get_cont_part(rec0.id, rec1.value_cod, rec2.value_cod, 'L'),
+            get_cont_part(rec0.ID, rec1.value_cod, rec2.value_cod, 'LEP'),
+            get_cont_part(rec0.ID, rec1.value_cod, rec2.value_cod, 'D'),
+            CASE WHEN part_in LIKE '02%' THEN                                                                                                                   -- Приходится делать развилку для 2000-ка - здесь другая ширина узкой полосы.
+            get_cont_part(rec0.ID, rec1.value_cod, rec2.value_cod, 'T2000')
+            ELSE
+            get_cont_part(rec0.ID, rec1.value_cod, rec2.value_cod, 'T')
+            END,
+            get_cont_part(rec0.id, rec1.value_cod, rec2.value_cod, 'B'),
+            get_cont_part(rec0.id, rec1.value_cod, rec2.value_cod, 'B2'),
+            get_cont_part(rec0.ID, rec1.value_cod, rec2.value_cod, 'W'),
+            get_cont_part(rec0.ID, rec1.value_cod, rec2.value_cod, 'Z'),
+            get_cont_part(rec0.ID, rec1.value_cod, rec2.value_cod, 'N'),
+            get_cont_part(rec0.ID, rec1.value_cod, rec2.value_cod, 'N1')
+          from centroid_ppo where mslink = rec0.c_mslink;
+      END LOOP;
+    END LOOP;
+  END LOOP;
+  IF part_in LIKE '02%' THEN                                                                                                                                    -- Для 2000-ка вся территория промпредприятий меняется на застроенную.
+    FOR rec IN (SELECT cnt_id, CATEGORY, terr_type, square, spec, lep, road, thin_stripe, bridges, bridges2, water, z, n, n1 FROM ppo_smeta_terr WHERE terr_type = '3' AND square > 0) LOOP
+      UPDATE ppo_smeta_terr SET square = square + rec.square, spec = spec + rec.spec, lep = lep + rec.lep, road = road + rec.road, thin_stripe = thin_stripe + rec.thin_stripe,
+        bridges = bridges + rec.bridges, bridges2 = bridges2 + rec.bridges2, water = water + rec.water, z = z + rec.z, n = n + rec.n, n1 = n1 + rec.n1
+        WHERE cnt_id = rec.cnt_id AND CATEGORY = rec.CATEGORY AND terr_type = '1';
+      UPDATE ppo_smeta_terr SET square = 0, spec = 0, lep = 0, road = 0, thin_stripe = 0, bridges = 0, bridges2 = 0, water = 0, z = 0, n = 0, n1 = 0 WHERE cnt_id = rec.cnt_id AND CATEGORY = rec.CATEGORY AND terr_type = '3';
+    END LOOP;
+  END IF;
+  UPDATE ppo_smeta_terr SET sq_overp = square - bridges - bridges2;                                                                                             -- Столбец для облегчения последующих расчетов площадей без мостов.
+  IF USER IN ('PPO','AKALINICHENKO') THEN                                                                                                                       -- Копия временной таблицы перебрасывается в аналогичную постоянную
+    DELETE ppo_smeta_terr_solid;                                                                                                                                -- для возможности дальнейшего анализа.
+    INSERT INTO ppo_smeta_terr_solid (cnt_id,cnt_square,CATEGORY,terr_type,square,spec,lep,road,thin_stripe,bridges,bridges2,water,z,n,n1,sq_overp)
+      SELECT cnt_id,cnt_square,CATEGORY,terr_type,square,spec,lep,road,thin_stripe,bridges,bridges2,water,z,n,n1,sq_overp FROM ppo_smeta_terr;
+  END IF;
+END;
+
+
+  PROCEDURE recalc(vid pls_integer, sid PLS_INTEGER, sno VARCHAR2 DEFAULT NULL) IS
+/*####################################################################################################################*/
+/* Процедура пересчета сметы/работы, взята из стандартной сметы, использует сметные пакеты
+/*####################################################################################################################*/
+    itog2 number;
+    itog number;
+    s0 number;
+    infl1_itog number;
+    infl2_itog number;
+    itog1 number;
+    nds number;
+    itog3 number;
+    pvalue number;
+    kvalue number;
+    partkl number;
+    parttr number;
+    partko NUMBER;
+    parttrp number;
+    parttrk number;
+    pvaluereal number;
+    kvaluereal number;
+    smeta_value NUMBER;
+    worktype VARCHAR2(30);
+    workcomp VARCHAR2(30);
+    workorder NUMBER;
+    stype VARCHAR2(1);
+  BEGIN
+    select smeta_type into stype from ppo_smeta_header_new where id = sid;
+    smeta_value := put_smeta(sid,itog,s0,infl1_itog,infl2_itog,itog1,nds,itog3,pvalue,kvalue,partkl,parttr,partko,parttrp,parttrk,pvaluereal,kvaluereal);
+    SELECT ord_id, category, kind into workorder, workcomp, worktype from ppo_voldates where id = vid;
+    IF worktype = 'пво' then
+      update ppo_smeta_header_new
+        set value = smeta_value, p_value = (pvalue + kvalue), k_value = 0, part_kl = partkl, part_ko = partko, part_tr = parttr, part_tr_p = parttrp, part_tr_k = parttrk, p_value_real = pvaluereal, k_value_real = kvaluereal
+        where id = sid;
+    else
+      update ppo_smeta_header_new
+        set value = smeta_value, p_value = pvalue, k_value = kvalue, part_kl = partkl, part_ko = partko, part_tr = parttr, part_tr_p = parttrp, part_tr_k = parttrk, p_value_real = pvaluereal, k_value_real = kvaluereal
+        where id = sid;
+    END if;
+    DECLARE
+      cnt number;
+          print_cat varchar2(5) := NULL;
+    BEGIN
+      FOR rec1 IN (SELECT CATEGORY FROM ppo_voldates WHERE ord_id = workorder AND kind = '985') LOOP
+        print_cat := rec1.CATEGORY;
+        EXIT;
+      END LOOP;
+      IF print_cat IS NOT NULL THEN
+            if workcomp = print_cat then
+              update ppo_smeta_header_new set part_prnt = round(k_value * 0.055) where id = sid;
+            end if;
+      end if;
+    END;
+        IF stype = 'П' THEN
+             UPDATE ppo_voldates SET VALUE = nvl(VALUE,0) + NVL(smeta_value,0) WHERE id = vid;
+             IF sno IS NOT NULL THEN
+               UPDATE ppo_voldates SET VALUE = nvl(VALUE,0) +  NVL(smeta_value,0) WHERE voldate_id = vid AND NO = sno;
+         END IF;
+    ELSE
+             UPDATE ppo_voldates SET VALUE_FACT = NVL(value_fact,0) + NVL(smeta_value,0) WHERE id = vid;
+             IF sno IS NOT NULL THEN
+           UPDATE ppo_voldates SET VALUE_FACT = NVL(value_fact,0) + NVL(smeta_value,0) WHERE voldate_id = vid AND NO = sno;
+             END IF;
+    END IF;
+--      COMMIT;
+  END recalc;
+  
+  
+   PROCEDURE TERR_CALC (work_id PLS_INTEGER, l_vol NUMBER, totvol NUMBER, thin_stripe NUMBER, water NUMBER, sm_num NUMBER, spec NUMBER, cat NUMBER, ttype NUMBER, adc VARCHAR2, bgroup NUMBER, sm_type PLS_INTEGER, cid n_list, cadd vc_list, rvalue n_list, sno NUMBER, bpr NUMBER DEFAULT NULL) IS
+/*####################################################################################################################*/
+/* Повторяющаяся процедура "обвязки" (расчёт базовой ставки и добавление сметы).
+/*####################################################################################################################*/
+    part_s NUMBER := 0;
+    q VARCHAR2(2000);
+    bp_cod NUMBER;
+    sid PLS_INTEGER;
+  BEGIN
+--  dbms_output.put_line('group='||bgroup||';cat='||cat||';ttype='||ttype||';ko_mrr='||ko_mrr||';ko='||ko||';adc='||adc);
+    IF NOT (k_397 < 1 AND water > 0) THEN                                                                                                                       -- Расчёт игнорируется, когда работа 397 (трубокабелеискатель) и есть вода.
+      i := i + 1;
+      IF i = sm_num THEN                                                                                                                                        -- Если рассматривается последняя смета по типам территорий,
+        part_s := totvol - sum_s;                                                                                                                               -- её объём определяется вычитанием сумм объёмов предыдущих смет из общего объёма работы.
+      ELSE
+        part_s := l_vol;
+      END IF;
+      IF part_s > 0 THEN
+        sum_s := sum_s + part_s;
+        IF bpr IS NULL /*AND part_in NOT IN ('0201','0202')*/ THEN                                                                                                  -- Входящий параметр базовой ставки. Прописан в REF_WORK_CAT. Если пусто,
+          q := 'SELECT cod FROM ref_base_price WHERE group_no = :bg AND par_cod = ''1'' AND val_cod = '||cat||' AND e_date IS NULL '||                          -- надо вычислять по сочетанию группы базовых цен, и параметров
+               'INTERSECT '||                                                                                                                                   -- типа территории и категории сложности.
+               'SELECT cod FROM ref_base_price WHERE group_no = :bg AND par_cod = ''2'' AND val_cod = '||ttype||' AND e_date IS NULL '||
+               'INTERSECT '||                                                                                                                                   -- бюджет/не бюджет.
+               'SELECT cod FROM ref_base_price WHERE group_no = :bg AND par_cod = ''53'' AND val_cod = '||ko_mrr||' AND e_date IS NULL';
+          if adc is not null THEN                                                                                                                               -- Если в REF_WORK_CAT поле ADD_COND заполнено, его значение добавляется
+            EXECUTE IMMEDIATE q || ' ' || adc INTO bp_cod USING bgroup,bgroup,bgroup,bgroup;                                                                    -- в условие нахождения базовой ставки.
+          else
+            EXECUTE IMMEDIATE q INTO bp_cod USING bgroup,bgroup,bgroup;
+          end if;
+/*        ELSIF bpr IS NULL AND part_in IN ('0201','0202') THEN                                                                                                  -- Входящий параметр базовой ставки. Прописан в REF_WORK_CAT. Если пусто,
+          q := 'SELECT cod FROM ref_base_price WHERE group_no = :bg AND par_cod = ''1'' AND val_cod = '||cat||' AND e_date IS NULL '||                          -- надо вычислять по сочетанию группы базовых цен, и параметров
+               'INTERSECT '||                                                                                                                                   -- типа территории и категории сложности.
+               'SELECT cod FROM ref_base_price WHERE group_no = :bg AND par_cod = ''2'' AND val_cod = '||ttype||' AND e_date IS NULL';
+          if adc is not null THEN                                                                                                                               -- Если в REF_WORK_CAT поле ADD_COND заполнено, его значение добавляется
+            EXECUTE IMMEDIATE q || ' ' || adc INTO bp_cod USING bgroup,bgroup,bgroup;                                                                           -- в условие нахождения базовой ставки.
+          else
+            EXECUTE IMMEDIATE q INTO bp_cod USING bgroup,bgroup;
+          end if;*/
+        ELSE                                                                                                                                                    -- Если же параметр задан, он является кодом базовой ставки.
+          bp_cod := bpr;
+        END IF;
+        IF thin_stripe = 0 THEN                                                                                                                                 -- Территория без узких линий.
+          sid := insert_smeta(p_vld_id => work_id, p_type => vc_list('П'), p_no => i, p_bp_id => bp_cod, sq_type => ttype, p_volume => part_s, p_measure => l_measure,
+            p_size_type => sm_type, p_ki => curinf, p_thin => 0, p_accel => 1, p_coeff_id => cid, p_coeff_add => cadd, p_real_value => rvalue, p_spec => spec, p_stg_no => sno);
+        ELSE                                                                                                                                                    -- Территория с узкими линиями.
+          sid := insert_smeta(p_vld_id => work_id, p_type => vc_list('П'), p_no => i, p_bp_id => bp_cod, sq_type => ttype, p_volume => part_s, p_measure => l_measure,
+            p_size_type => sm_type, p_ki => curinf, p_thin => thin_stripe, p_accel => 1, p_coeff_id => cid, p_coeff_add => cadd, p_real_value => rvalue, p_spec => spec, p_stg_no => sno);
+        END IF;
+        IF water > 0 THEN
+        BEGIN
+          INSERT INTO ppo_smeta_new (ppo_smeta_id, coeff_id, square, real_value) VALUES (sid, 132, water, 0.5);                                                 -- Добавляем на воду коэффициент обновления.
+        EXCEPTION
+          WHEN OTHERS THEN
+            NULL;
+        END;
+        END IF;
+      END IF;
+    END IF;
+  END;
+  
+  
+ PROCEDURE work_assort (ORDID PLS_INTEGER, part_in VARCHAR2 DEFAULT '0101') IS
+/*####################################################################################################################*/
+/* Основная рабочая процедура пакета. Создает работы и сметы в заказе на основании заданных параметров (идентификатор
+/* заказа и вид сметы). Львиную долю процедуры занимает расчет базовой ставки сметы путем исполнения для каждой работы
+/* динамических запросов из справочника REF_WORK_VOLUME*.
+/* Состоит из нескольких вложенных функций/процедур.
+/* * Памятка по расчету базовой стоимости будет приведена в конце пакета.
+/*####################################################################################################################*/
+  TYPE pars IS VARRAY(100) OF VARCHAR2(5);
+  TYPE vals IS VARRAY(100) OF NUMBER;
+  par_list     pars := pars();
+  val_list     vals := vals();
+  i            PLS_INTEGER := 0;
+  ko           NUMBER;
+  ko_mrr       NUMBER;
+  ovol         NUMBER;
+  are_id       PLS_INTEGER;
+  wid          PLS_INTEGER;
+  sid          PLS_INTEGER;
+  ex           VARCHAR2(1);
+  ater         VARCHAR2(1);
+  reg          VARCHAR2(1);
+  fsource      VARCHAR2(5);
+  ekoeff       NUMBER;
+  cnt          PLS_INTEGER;
+  vol_397      NUMBER := 0;
+  k_397        NUMBER(5,2) := 1;
+  k_397_old    NUMBER(5,2) := 1;
+  q            VARCHAR2(4000);
+  formula      VARCHAR2(4000);
+  ono          VARCHAR2(255);
+  volu         NUMBER;
+  scod         NUMBER;
+  vol_w        NUMBER := 0;
+  sum_s        NUMBER := 0;
+  part_s       NUMBER;
+  curinf       PLS_INTEGER;
+  curacc       NUMBER;
+  acctype      VARCHAR2(5);
+  volu_tot     NUMBER;
+  is_132       PLS_INTEGER;
+  max_132      PLS_INTEGER;
+  spec         NUMBER;
+  l_cao        NUMBER;
+  spec_tot     NUMBER;
+  gidr_tot     NUMBER;
+  most_tot     NUMBER;
+  n_tot        NUMBER;
+  n1_tot       NUMBER;
+  num_s        PLS_INTEGER;
+  oscale       VARCHAR2(5);
+  pid          PLS_INTEGER;
+  l_measure    VARCHAR2(50);
+  l_base_group NUMBER;
+  conf         VARCHAR2(1);
+  cnt_prev_ord NUMBER := 0;
+  cnt_overp    NUMBER := 0;
+  vol_overp    NUMBER := 0;
+  cnt_brdg     NUMBER := 0;
+  bound_1      NUMBER;
+  bound_2      NUMBER;
+  cnt_re_lgr   NUMBER := 0;
+  cnt_re_ko    NUMBER := 0;
+  cnt_tree     NUMBER := 0;
+  cnt_reoutput NUMBER := 0;
+  cnt_surv     NUMBER := 0;
+  calc_err     NUMBER;
