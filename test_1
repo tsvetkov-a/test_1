@@ -1,37 +1,509 @@
-{аванс цифры коп}	Метка {аванс цифры} с копейками для qr-кода. Там должно в конце два нуля вроде приписываться.
-(для примера {заказ_закр_доплата_цифра коп} )
+create or replace PACKAGE BODY AUTO_ORD_PCK IS
+
+FUNCTION get_cont_part (cntID PLS_INTEGER, ttype PLS_INTEGER, ccomp PLS_INTEGER, isbridge VARCHAR2 DEFAULT NULL) RETURN NUMBER IS
+/*####################################################################################################################*/
+/* Расчет суммарной площади пересечения конкретного контура заказа с балансом территорий. Дополнительно задается
+/* категория сложности и тип территории. Параметр ISBRIDGE может принимать значания B и B2- пересечение с территориями
+/* мостов, тоннелей и эстакад, C - пересечение с территориями ЦАО, W - пересечение с объектами гидрографии, L - терри-
+/* тории спецрежима (ЛЭП и пр.), T - узкие полосы в балансе территорий (T2 - для 2000-ка), G - ЖД, D - дороги, LEP - ЛЭП
+/* Z - детализированная застроенная и N - детализированная незастроенная (N1 - без гидрографии).
+/*####################################################################################################################*/
+  sq NUMBER := 0;
+BEGIN
+  IF isbridge IS NULL THEN
+    SELECT nvl(ROUND(SUM(SDO_GEOM.sdo_area(SDO_GEOM.sdo_intersection(c1.contour,c2.contour,0.001),0.001))/10000,2),0)
+      INTO sq
+      FROM ppo_contours c1 JOIN ref_terr_balance c2 ON SDO_FILTER(c2.contour,c1.contour) = 'TRUE'
+      WHERE c1.id = cntid AND sdo_geom.RELATE(c1.contour,'ANYINTERACT',c2.contour,0.001) = 'TRUE'
+      AND c2.type_terr IN ('нж', 'ж', 'п', 'д', 'г', 'р', 'рф')
+      AND c2.type_terr_smeta = CASE WHEN ttype > 0 THEN ttype ELSE c2.type_terr_smeta END AND c2.cat_complexity = CASE WHEN ccomp > 0 THEN ccomp ELSE c2.cat_complexity END;
+  ELSIF isbridge = 'B' THEN
+    SELECT nvl(ROUND(sum(SDO_GEOM.sdo_area(SDO_GEOM.sdo_intersection(SDO_GEOM.sdo_intersection(c1.contour,c2.contour,0.001),c3.contour,0.001),0.001))/10000,2),0)
+      INTO sq
+      FROM ppo.ppo_contours c1 JOIN ref_terr_balance c2 ON SDO_FILTER(c2.contour,c1.contour) = 'TRUE' JOIN ref_terr_balance c3 ON SDO_FILTER(c3.contour,c1.contour) = 'TRUE'
+      WHERE c1.id = cntID AND sdo_geom.RELATE(c1.contour,'ANYINTERACT',c2.contour,0.001) = 'TRUE'
+      AND sdo_geom.RELATE(c1.contour,'ANYINTERACT',c3.contour,0.001) = 'TRUE'
+      AND c2.type_terr IN ('нж', 'ж', 'п', 'д', 'г', 'р', 'рф') AND c3.type_terr IN ('ма','мж')
+      AND c2.type_terr_smeta = CASE WHEN ttype > 0 THEN ttype ELSE c2.type_terr_smeta END AND c2.cat_complexity = CASE WHEN ccomp > 0 THEN ccomp ELSE c2.cat_complexity END;
+  ELSIF isbridge = 'B2' THEN
+    SELECT nvl(ROUND(sum(SDO_GEOM.sdo_area(SDO_GEOM.sdo_intersection(SDO_GEOM.sdo_intersection(c1.contour,c2.contour,0.001),c3.contour,0.001),0.001))/10000,2),0)
+      INTO sq
+      FROM ppo.ppo_contours c1 JOIN ref_terr_balance c2 ON SDO_FILTER(c2.contour,c1.contour) = 'TRUE' JOIN ref_terr_balance c3 ON SDO_FILTER(c3.contour,c1.contour) = 'TRUE'
+      WHERE c1.id = cntID AND sdo_geom.RELATE(c1.contour,'ANYINTERACT',c2.contour,0.001) = 'TRUE'
+      AND sdo_geom.RELATE(c1.contour,'ANYINTERACT',c3.contour,0.001) = 'TRUE'
+      AND c2.type_terr IN ('нж', 'ж', 'п', 'д', 'г', 'р', 'рф') AND c3.type_terr IN ('па','пж','эа','эж')
+      AND c2.type_terr_smeta = CASE WHEN ttype > 0 THEN ttype ELSE c2.type_terr_smeta END AND c2.cat_complexity = CASE WHEN ccomp > 0 THEN ccomp ELSE c2.cat_complexity END;
+  ELSIF isbridge = 'C' THEN
+    SELECT nvl(ROUND(sum(SDO_GEOM.sdo_area(SDO_GEOM.sdo_intersection(c1.contour,c2.contour,0.001),0.001))/10000,2),0)
+      INTO sq
+      FROM ppo.ppo_contours c1 JOIN ref_terr_balance c2 ON SDO_FILTER(c2.contour,c1.contour) = 'TRUE'
+      WHERE c1.id = cntID AND sdo_geom.RELATE(c1.contour,'ANYINTERACT',c2.contour,0.001) = 'TRUE'
+      AND c2.type_terr IN ('цао');
+  ELSIF isbridge = 'W' THEN
+    SELECT nvl(ROUND(sum(SDO_GEOM.sdo_area(SDO_GEOM.sdo_intersection(c1.contour,c2.contour,0.001),0.001))/10000,2),0)
+      INTO sq
+      FROM ppo.ppo_contours c1 JOIN ref_terr_balance c2 ON SDO_FILTER(c2.contour,c1.contour) = 'TRUE'
+      WHERE c1.id = cntID AND sdo_geom.RELATE(c1.contour,'ANYINTERACT',c2.contour,0.001) = 'TRUE' AND c2.type_terr IN ('г')
+      AND c2.type_terr_smeta = ttype AND c2.cat_complexity = ccomp;
+  ELSIF isbridge = 'L' THEN
+    SELECT nvl(ROUND(sum(SDO_GEOM.sdo_area(SDO_GEOM.sdo_intersection(c1.contour,c2.contour,0.001),0.001))/10000,2),0)
+      INTO sq
+      FROM ppo.ppo_contours c1 JOIN ref_terr_balance c2 ON SDO_FILTER(c2.contour,c1.contour) = 'TRUE'
+      WHERE c1.id = cntID AND sdo_geom.RELATE(c1.contour,'ANYINTERACT',c2.contour,0.001) = 'TRUE' AND c2.type_terr IN ('лэп','д')
+      AND c2.type_terr_smeta = CASE WHEN ttype > 0 THEN ttype ELSE c2.type_terr_smeta END AND c2.cat_complexity = CASE WHEN ccomp > 0 THEN ccomp ELSE c2.cat_complexity END;
+  ELSIF isbridge = 'T' THEN
+    SELECT nvl(ROUND(sum(SDO_GEOM.sdo_area(SDO_GEOM.sdo_intersection(c1.contour,c2.contour,0.001),0.001))/10000,2),0)
+      INTO sq
+      FROM (SELECT ws.get_thin_strips(contour,p_size => 70) contour FROM ppo_contours WHERE id = cntID) c1, ref_terr_balance c2
+      WHERE SDO_FILTER(c2.contour,c1.contour) = 'TRUE' AND sdo_geom.RELATE(c1.contour,'ANYINTERACT',c2.contour,0.001) = 'TRUE'
+      AND c2.type_terr IN ('нж', 'ж', 'п', 'д', 'г', 'р', 'рф')
+      AND c2.type_terr_smeta = ttype AND c2.cat_complexity = ccomp;
+  ELSIF isbridge = 'T2000' THEN
+    SELECT nvl(ROUND(sum(SDO_GEOM.sdo_area(SDO_GEOM.sdo_intersection(c1.contour,c2.contour,0.001),0.001))/10000,2),0)
+      INTO sq
+      FROM (SELECT ws.get_thin_strips(contour,p_size => 150) contour FROM ppo_contours WHERE id = cntID) c1, ref_terr_balance c2
+      WHERE SDO_FILTER(c2.contour,c1.contour) = 'TRUE' AND sdo_geom.RELATE(c1.contour,'ANYINTERACT',c2.contour,0.001) = 'TRUE'
+      AND c2.type_terr IN ('нж', 'ж', 'п', 'д', 'г', 'р', 'рф')
+      AND c2.type_terr_smeta = ttype AND c2.cat_complexity = ccomp;
+  ELSIF isbridge = 'G' THEN
+    SELECT nvl(ROUND(sum(SDO_GEOM.sdo_area(SDO_GEOM.sdo_intersection(c1.contour,c2.contour,0.001),0.001))/10000,2),0)
+      INTO sq
+      FROM ppo.ppo_contours c1 JOIN ref_terr_balance c2 ON SDO_FILTER(c2.contour,c1.contour) = 'TRUE'
+      WHERE c1.id = cntID AND sdo_geom.RELATE(c1.contour,'ANYINTERACT',c2.contour,0.001) = 'TRUE'
+      AND c2.type_terr IN ('жд');
+  ELSIF isbridge = 'Z' THEN
+    SELECT nvl(ROUND(SUM(SDO_GEOM.sdo_area(SDO_GEOM.sdo_intersection(c1.contour,c2.contour,0.001),0.001))/10000,2),0)
+      INTO sq
+      FROM ppo_contours c1 JOIN ref_terr_balance c2 ON SDO_FILTER(c2.contour,c1.contour) = 'TRUE'
+      WHERE c1.id = cntid AND sdo_geom.RELATE(c1.contour,'ANYINTERACT',c2.contour,0.001) = 'TRUE'
+      AND c2.type_terr IN ('нж', 'ж', 'д', 'п')
+      AND c2.type_terr_smeta = CASE WHEN ttype > 0 THEN ttype ELSE c2.type_terr_smeta END AND c2.cat_complexity = CASE WHEN ccomp > 0 THEN ccomp ELSE c2.cat_complexity END;
+  ELSIF isbridge = 'N' THEN
+    SELECT nvl(ROUND(SUM(SDO_GEOM.sdo_area(SDO_GEOM.sdo_intersection(c1.contour,c2.contour,0.001),0.001))/10000,2),0)
+      INTO sq
+      FROM ppo_contours c1 JOIN ref_terr_balance c2 ON SDO_FILTER(c2.contour,c1.contour) = 'TRUE'
+      WHERE c1.id = cntid AND sdo_geom.RELATE(c1.contour,'ANYINTERACT',c2.contour,0.001) = 'TRUE'
+      AND c2.type_terr IN ('г', 'р', 'рф')
+      AND c2.type_terr_smeta = CASE WHEN ttype > 0 THEN ttype ELSE c2.type_terr_smeta END AND c2.cat_complexity = CASE WHEN ccomp > 0 THEN ccomp ELSE c2.cat_complexity END;
+  ELSIF isbridge = 'N1' THEN
+    SELECT nvl(ROUND(SUM(SDO_GEOM.sdo_area(SDO_GEOM.sdo_intersection(c1.contour,c2.contour,0.001),0.001))/10000,2),0)
+      INTO sq
+      FROM ppo_contours c1 JOIN ref_terr_balance c2 ON SDO_FILTER(c2.contour,c1.contour) = 'TRUE'
+      WHERE c1.id = cntid AND sdo_geom.RELATE(c1.contour,'ANYINTERACT',c2.contour,0.001) = 'TRUE'
+      AND c2.type_terr IN ('р', 'рф')
+      AND c2.type_terr_smeta = CASE WHEN ttype > 0 THEN ttype ELSE c2.type_terr_smeta END AND c2.cat_complexity = CASE WHEN ccomp > 0 THEN ccomp ELSE c2.cat_complexity END;
+  ELSIF isbridge = 'LEP' THEN
+    SELECT nvl(ROUND(sum(SDO_GEOM.sdo_area(SDO_GEOM.sdo_intersection(SDO_GEOM.sdo_intersection(c1.contour,c2.contour,0.001),c3.contour,0.001),0.001))/10000,2),0)
+      INTO sq
+      FROM ppo.ppo_contours c1 JOIN ref_terr_balance c2 ON SDO_FILTER(c2.contour,c1.contour) = 'TRUE' JOIN ref_terr_balance c3 ON SDO_FILTER(c3.contour,c1.contour) = 'TRUE'
+      WHERE c1.id = cntID AND sdo_geom.RELATE(c1.contour,'ANYINTERACT',c2.contour,0.001) = 'TRUE'
+      AND sdo_geom.RELATE(c1.contour,'ANYINTERACT',c3.contour,0.001) = 'TRUE'
+      AND c2.type_terr IN ('нж', 'ж', 'п', 'д', 'г', 'р', 'рф') AND c3.type_terr = 'лэп'
+      AND c2.type_terr_smeta = ttype AND c2.cat_complexity = ccomp;
+  ELSIF isbridge = 'D' THEN
+    SELECT nvl(ROUND(sum(SDO_GEOM.sdo_area(SDO_GEOM.sdo_intersection(c1.contour,c2.contour,0.001),0.001))/10000,2),0)
+      INTO sq
+      FROM ppo.ppo_contours c1 JOIN ref_terr_balance c2 ON SDO_FILTER(c2.contour,c1.contour) = 'TRUE'
+      WHERE c1.id = cntID AND sdo_geom.RELATE(c1.contour,'ANYINTERACT',c2.contour,0.001) = 'TRUE'
+      AND c2.type_terr IN ('д')
+      AND c2.type_terr_smeta = CASE WHEN ttype > 0 THEN ttype ELSE c2.type_terr_smeta END AND c2.cat_complexity = CASE WHEN ccomp > 0 THEN ccomp ELSE c2.cat_complexity END;
+  END IF;
+  RETURN sq;
+EXCEPTION
+  WHEN OTHERS THEN RETURN 0;
+END;
 
 
-        cursor  c_prd_pp(o_id pls_integer)  is
-            select max(e_date_fact) keep (dense_rank first order by INSERTED desc)
-                from vw_ord_prd where
-                    ro_id=1293743
-                    and e_date_fact is not null
-                    and ord_id=o_id /*Предварительная проверка*/;
-
-    r_ord       c_ord%rowtype;
-    r_my        c_money%rowtype;
-    r_my856    c_money_856%rowtype;
-    r_adv       number(25, 2);
-    r_advpay    number(25, 2);
-    r_advpay_stg    number(25, 2);
-    r_advnds    number(25, 2);
-    r_ispst     number(25, 2);
-    x7          number(25, 2);
-    x8          number(25, 2);
+    FUNCTION get_int_borders(text_int varchar2, border_no pls_integer) return number is
+    begin
+      return to_number(regexp_substr(text_int, '\d+(\.\d+){0,1}', 1, border_no),'FM99999D9','NLS_NUMERIC_CHARACTERS = ''.,''');
+    end get_int_borders;
+    
+        FUNCTION get_int_sum(p_s NUMBER, p_bp PLS_INTEGER, out_cod OUT PLS_INTEGER) RETURN NUMBER IS
+      l_c NUMBER;
+    BEGIN
+      FOR rec_a IN (SELECT DISTINCT par_cod,bp_method FROM ref_base_price WHERE group_no = p_bp AND e_date IS NULL) LOOP
+        IF rec_a.bp_method = 'I' AND rec_a.par_cod != 53 THEN
+          FOR rec_b IN (SELECT value_cod,value_text FROM class_param_values WHERE param_cod = rec_a.par_cod AND value_cod IN
+            (SELECT DISTINCT val_cod FROM ref_base_price WHERE group_no = p_bp)) LOOP
+            IF p_s > get_int_borders(rec_b.value_text,1) AND p_s <= NVL(get_int_borders(rec_b.value_text,2),1000000) THEN
+              SELECT DISTINCT cod, base_price INTO out_cod, l_c FROM ref_base_price WHERE group_no = p_bp AND par_cod = rec_a.par_cod AND val_cod = rec_b.value_cod AND e_date IS NULL;
+              RETURN l_c;
+            END IF;
+          END LOOP;
+        END IF;
+      END LOOP;
+      RETURN 0;
+    END get_int_sum;
     
     
-    open c_ispst(ord_id);
-    fetch c_ispst into r_ispst;
-    close c_ispst;
-    r_ispst := nvl(r_ispst, 0);
-    x7 := abs(round(r_ispst*(1 + cNDS) - r_advpay, 2));
-    x8 := round(x7 - x7/(1 + cNDS), 2);
-    put_value('заказ_закр_доплата_цифра', x7);
-    put_value_money('заказ_закр_доплата_пропись', x7);
-    add_label('{заказ_закр_доплата_цифра коп}', to_char(x7*100, 'FM99999999999000'));
-    put_value('НДС_заказ_закр_доплата_цифра',    x8);
-    put_value_money('НДС_заказ_закр_доплата_пропись', x8);
+  FUNCTION insert_smeta(p_vld_id number, p_type vc_list, p_no number, p_bp_id number, sq_type number, p_volume number, p_measure varchar2, p_size_type pls_integer, p_ki number,
+                         p_thin NUMBER := 0, p_accel number := 1, p_coeff_id n_list := null, p_real_value n_list := null, p_spec number := 0, p_coeff_add vc_list := null, p_stg_no varchar2 := null, p_accel_type VARCHAR2 := NULL,
+                         p_371 VARCHAR2 := NULL) RETURN PLS_INTEGER is
+/*####################################################################################################################*/
+/* Функция добавления сметы в работу. Содержит добавление заголовка сметы и набора коэффициентов, заданных для
+/* каждой работы в справочнике REF_WORK_CAT. Включает в себя процедуру пересчета сметы.
+/* Коэффициент "небольшие участки.." применяется к контурам заказа, а не к объему заказа в целом, и не к объему разделенных категорий.
+/* Например:
+/* 1. Заказ 4.50га с одним контуром. Тогда в заказе ко всем категориям необходимо применить коэфф. "небольшие участки от 1га до 5 га или узкие полосы до 70 м"
+/* 2. Заказ 4.50га, но там 2 контура: один 0.50га, второй 4 га. Тогда к категориям, которые определены в границах контура 0.50га, применяем коэфф. "небольшие
+/*    участки до 1га", а к категориям контура с площадью 4га - "небольшие участки от 1га до 5 га или узкие полосы до 70 м".
+/* 3. Заказ 10.00га состоит из 7 контуров: один 5.50га, второй 3га и 5 контуров общей площадью 1.90га (каждый из 5 контуров площадью до 1 га). Тогда
+/*    к категориям, определенным в контуре площадь 5.50га, мы не применяем коэффициент "небольшие участки…"; к категориям, определенным в контуре площадью 3га,
+/*    применяем коэфф. "небольшие участки от 1га до 5 га или узкие полосы до 70 м", а к категориям, определенным в остальных 5 контурах, применяем коэфф.
+/*    "небольшие участки до 1га"
+/* 4. Заказ 6.00га, но его часть состоит из узкой полосы шириной до 70 метров, тогда в категориях, попадающих в эту узкую полосу мы также должны брать коэфф.
+/*    "небольшие участки от 1га до 5 га или узкие полосы до 70 м", а его объем будет равен площади попадающей в узкую полосу категории
+/*####################################################################################################################*/
+    sh_id number(20);
+    cval NUMBER(6,3);
+    pvol NUMBER := p_volume;
+    is_65 PLS_INTEGER := 0;
+    meas PLS_INTEGER;
+    volume NUMBER(10,3);
+    cao NUMBER;
+    gd NUMBER;
+    dor NUMBER;
+    wname varchar2(10);
+  BEGIN
+    for p in (select column_value st from table(p_type)) loop
+DBMS_OUTPUT.put_line('ppo_stages_id = '||p_vld_id||';smeta_type='||p.st||';smeta_no='||p_no||';smeta_volume='||p_volume||';thin='||p_thin||';bp='||p_bp_id);
+      SELECT rv_abbreviation INTO meas FROM cg_ref_codes WHERE rv_domain = 'PPO MEASURE' AND rv_low_value = p_measure;
+      IF nvl(meas,0) = 0 THEN
+        volume := ROUND(p_volume);
+      ELSE
+        volume := p_volume;
+      END IF;
+      IF nvl(p_stg_no,'0') != '0' THEN
+        SELECT kind INTO wname FROM ppo_voldates WHERE id = (SELECT voldate_id FROM ppo_voldates WHERE id = p_vld_id);
+      ELSE
+        SELECT kind INTO wname FROM ppo_voldates WHERE id = p_vld_id;
+      END IF;
+      insert into ppo_smeta_header_new(ppo_stages_id, smeta_type, smeta_no, bp_id, research_volume, k_infl, k_infl_percent, k_accel, accel_type, old_id)        -- Если указан параметр p_371 (техотчет или программа работ), и смета вставляется в этап,
+        VALUES (p_vld_id, p.st, p_no, p_bp_id, volume, p_ki, 100, p_accel, p_accel_type, CASE WHEN p_371 IS NOT NULL AND nvl(p_stg_no,'0') != '0' THEN '1,2' ELSE NULL END) returning id into sh_id;
+                                                                                                                                                                -- нужно заполнять поле OLD_ID значением "1,2", чтобы учесть в расчетах подеревную съемку.
+      FOR rec_coeff IN                                                                                                                                          -- Сметные коэффициенты, работа ведется с данными типа N_LIST и VC_LIST.
+      (
+      select sh_id, cf.v cfv, nvl(rv.v, (select coeff_value from ref_coeff where id = cf.v)) rvv
+      from (
+      select rownum rn, column_value v from table(nvl(p_coeff_id, n_list()))
+      UNION
+      select rownum rn, to_number(column_value) v from table(nvl(p_coeff_add, vc_list()))) cf
+      left outer join (select rownum rn, column_value v from table(nvl(p_real_value, n_list()))) rv using (rn)
+      where cf.v is not NULL
+      ) LOOP
+      pvol := volume;
+/*####################################################################################################################*/
+/* Обработка конкретных коэффициентов
+/*####################################################################################################################*/
+      CASE rec_coeff.cfv
+/*####################################################################################################################*/
+/* Составление инж.-топограф. плана в масштабе 1:200
+/*####################################################################################################################*/
+        WHEN 1 THEN
+          cval := 2;
+          pvol := NULL;
+/*####################################################################################################################*/
+/* Выполнение изысканий в условиях специального режима
+/*####################################################################################################################*/
+        WHEN -120 THEN                                                                                                                                          -- Отрицательные коды представляют коэффициенты, которые имеют
+          cval := 1.25;                                                                                                                                         -- уникальную систему расчета для определенных работ.
+          pvol := volume;
+        WHEN -12 THEN
+          IF nvl(conf,'N') = 'Y' THEN                                                                                                                           -- conf - признак секретности заказа, тянется из основной процедуры.
+            cval := 1.25;
+            pvol := volume;
+          ELSE
+            cval := 1;
+          END IF;
+        WHEN 12 THEN
+          IF nvl(conf,'N') = 'Y' THEN
+            cval := 1.25;
+            pvol := volume;
+          ELSIF NVL(p_spec,0) > 0 AND NVL(volume,0) > 0 THEN
+            pvol := least(p_spec,volume);
+            cval := 1 + (1.25 - 1) * pvol/volume;
+          ELSE
+            cval := 1;
+          END IF;
+/*####################################################################################################################*/
+/* Выполнение работ с  использованием материалов ограниченного пользования
+/*####################################################################################################################*/
+        WHEN 54 THEN
+          IF nvl(conf,'N') = 'Y' THEN
+            cval := 1.1;
+          ELSE
+            cval := 1;
+          END IF;
+          pvol := NULL;
+/*####################################################################################################################*/
+/* Составление плана в цвете (красках)
+/*####################################################################################################################*/
+        WHEN -56 THEN
+          SELECT COUNT(id) INTO cnt FROM ppo_ord_attrs WHERE ord_id = ORDID AND NAME IN ('SURV_LGR','ARCH_LGR','ARCH2000_LGR','SIT_LGR');                                      -- Данные из таблицы атрибутов.
+          IF cnt > 0 AND /*(ko = 2 OR nvl(fsource,'N') = 'гз')*/ko_mrr = 2 THEN
+            cval := 1.1;
+          ELSE
+            cval := 1;
+          END IF;
+          pvol := NULL;
+        WHEN 56 THEN
+          IF /*ko = 2 OR nvl(fsource,'N') = 'гз'*/ko_mrr = 2 THEN
+            cval := rec_coeff.rvv;
+          ELSE
+            cval := 1;
+          END IF;
+          pvol := NULL;
+/*####################################################################################################################*/
+/* С применением компьютерных технологий
+/*####################################################################################################################*/
+        WHEN 57 THEN
+          IF /*ko = 2 OR nvl(fsource,'N') = 'гз'*/ko_mrr = 2 THEN
+            cval := rec_coeff.rvv;
+          ELSE
+            cval := 1;
+          END IF;
+          pvol := NULL;
+/*####################################################################################################################*/
+/* Подеревная съемка
+/*####################################################################################################################*/
+        WHEN 62 THEN
+          cval := rec_coeff.rvv;
+          pvol := NULL;
+/*####################################################################################################################*/
+/* По существующим материалам
+/*####################################################################################################################*/
+        WHEN 63 THEN
+          cval := rec_coeff.rvv;
+          pvol := NULL;
+/*####################################################################################################################*/
+/* Неполный состав работ
+/*####################################################################################################################*/
+        WHEN -64 THEN
+          IF NOT ko_mrr = 1 THEN
+            cval := 0.15;
+          ELSE
+            cval := 1;
+          END if;
+          pvol := NULL;
+        WHEN 64 THEN
+          IF NOT ko_mrr = 1 THEN
+            cval := rec_coeff.rvv;
+          ELSE
+            cval := 1;
+          END if;
+          pvol := NULL;
+/*####################################################################################################################*/
+/* Небольшие участки до 1 га
+/*####################################################################################################################*/
+        WHEN 65 THEN
+          IF ((p_size_type = 0 and volume < 1) OR p_size_type = 1) AND is_65 = 0 THEN                                                                           -- p_size_type - передаваемый из работы 101 и подобных параметр,
+            is_65 := 1;                                                                                                                                         -- описывающий характер территории в зависимости от контура заказа,
+            cval := 1.4;                                                                                                                                        -- 0 - любая территория.
+            pvol := volume;
+          ELSE
+            cval := 1;
+          END IF;
+/*####################################################################################################################*/
+/* Небольшие участки св.1 до 5 га или узкие полосы до 70 м.
+/*####################################################################################################################*/
+        WHEN 66 THEN
+          IF ((p_size_type = 0 AND volume >= 1 AND volume < 5) OR (p_size_type = 2 AND p_thin = 0)) AND is_65 = 0 THEN
+            cval := 1.2;
+            pvol := volume;
+            is_65 := 1;
+          ELSIF p_size_type = 2 AND p_thin > 0 AND is_65 = 0 THEN
+            pvol := least(p_thin,volume);
+            cval := 1 + (1.2 - 1) * pvol/volume;
+            is_65 := 1;
+          ELSE
+            cval := 1;
+          END IF;
+/*####################################################################################################################*/
+/* Небольшие участки до 10 га
+/*####################################################################################################################*/
+        WHEN 67 THEN                                                                                                                                            -- Следующие два коэффициента идентичны двум предыдущим, но границы территорий
+          IF ((p_size_type = 0 and volume < 10) OR p_size_type = 1) AND is_65 = 0 THEN                                                                          -- увеличены в 10 раз для масштаба 1:2000. Номера коэффициентов разные, поэтому
+            is_65 := 1;                                                                                                                                         -- переменные bound_1 и bound_2 можно не использовать.
+            cval := 1.4;
+            pvol := volume;
+          ELSE
+            cval := 1;
+          END IF;
+/*####################################################################################################################*/
+/* Небольшие участки св.10 до 50 га или узкие полосы до 150 м.
+/*####################################################################################################################*/
+        WHEN 68 THEN
+          IF ((p_size_type = 0 AND volume >= 10 AND volume < 50) OR (p_size_type = 2 AND p_thin = 0)) AND is_65 = 0 THEN
+            cval := 1.2;
+            pvol := volume;
+            is_65 := 1;
+          ELSIF p_size_type = 2 AND p_thin > 0 AND is_65 = 0 THEN
+            pvol := least(p_thin,volume);
+            cval := 1 + (1.2 - 1) * pvol/volume;
+            is_65 := 1;
+          ELSE
+            cval := 1;
+          END IF;
+/*####################################################################################################################*/
+/* Нанесение актуальных линий градостроительного регулирования
+/*####################################################################################################################*/
+        WHEN 73 THEN
+          SELECT COUNT(id) INTO cnt FROM ppo_ord_attrs WHERE ord_id = ORDID AND NAME IN ('SURV_LGR','ARCH_LGR','ARCH2000_LGR','SIT_LGR');
+          IF cnt > 0 THEN
+            cval := rec_coeff.rvv;
+          ELSE
+            cval := 1;
+          END IF;
+          pvol := NULL;
+/*####################################################################################################################*/
+/* Количество коммуникаций на участке свыше 10
+/*####################################################################################################################*/
+        WHEN 79 THEN
+          SELECT NVL(SUM(get_cont_part(ID,0,0,'C')),0),NVL(SUM(get_cont_part(ID,0,0,'G')),0) INTO cao,gd FROM ppo_contours WHERE ord_id = ORDID;                -- Объём пересечения с ЦАО и гидрографией.
+          IF p_no in (1,3) AND ((cao > 0 AND ko_mrr != 1) OR gd > 0) THEN
+            cval := 1.7;
+          ELSIF cao > 0 AND ko_mrr = 1 THEN
+            cval := 1;
+          ELSE
+            cval := 1;
+          END IF;
+/*####################################################################################################################*/
+/* Подеревная съемка на застроенной территории
+/*####################################################################################################################*/
+        WHEN 80 THEN
+          cval := rec_coeff.rvv;
+          pvol := NULL;
+/*####################################################################################################################*/
+/* Координирование углов всех кап. зданий, выходов подз. комм. и осн.надзем. сооруж.
+/*####################################################################################################################*/
+        WHEN 81 THEN
+          IF sq_type IN (1,3) THEN
+            cval := 1.25;
+          ELSE
+            cval := 1;
+          END IF;
+/*####################################################################################################################*/
+/* Выполнение высотной съемки камеральный
+/*####################################################################################################################*/
+        WHEN 101 THEN
+          SELECT COUNT(id) INTO cnt FROM ppo_ord_attrs WHERE ord_id = ORDID AND NAME = 'SURV_SAG_PL';
+          IF cnt > 0 THEN
+            cval := rec_coeff.rvv;
+          ELSE
+            cval := 1;
+          END IF;
+          pvol := NULL;
+/*####################################################################################################################*/
+/* Выполнение высотной съемки полевой
+/*####################################################################################################################*/
+        WHEN 121 THEN
+          SELECT COUNT(id) INTO cnt FROM ppo_ord_attrs WHERE ord_id = ORDID AND NAME = 'SURV_SAG_PL';
+          IF cnt > 0 THEN
+            cval := rec_coeff.rvv;
+          ELSE
+            cval := 1;
+          END IF;
+          pvol := NULL;
+/*####################################################################################################################*/
+/* Обновление планов
+/*####################################################################################################################*/
+        WHEN 132 THEN
+          cval := 0.5;
+          pvol := volume;
+/*####################################################################################################################*/
+/* Создание цифровой трехмерной модели местности (рельефа)
+/*####################################################################################################################*/
+        WHEN 155 THEN
+          cval := 2;
+/*####################################################################################################################*/
+/* Неполный состав работ (может быть 0.15)
+/*####################################################################################################################*/
+        WHEN -168 THEN
+          cval := 0.15;
+        WHEN 168 THEN
+          cval := 0.5;
+/*####################################################################################################################*/
+/* Проверка наличия и нанесение основных планировочных высотных (красных) отметок (изготовление копий исходных документов при их наличии и отражение информации в составе топографического плана)
+/*####################################################################################################################*/
+        WHEN 215 THEN
+          SELECT COUNT(id) INTO cnt FROM ppo_ord_attrs WHERE ord_id = ORDID AND NAME IN ('SURV_KO','ARCH_KO');
+          IF cnt > 0 THEN
+            cval := rec_coeff.rvv;
+          ELSE
+            cval := 1;
+          END IF;
+          pvol := NULL;
+/*####################################################################################################################*/
+/* Проверка наличия и нанесение перспективного поперечного профиля улицы (изготовление копий исходных документов при их наличии и отражение информации в составе топографического плана)
+/*####################################################################################################################*/
+        WHEN 216 THEN
+          SELECT COUNT(id) INTO cnt FROM ppo_ord_attrs WHERE ord_id = ORDID AND NAME in ('SURV_KO','ARCH_KO');
+          SELECT NVL(SUM(get_cont_part(ID,0,0,'D')),0) INTO dor FROM ppo_contours WHERE ord_id = ORDID;
+          IF cnt > 0 AND dor > 0 THEN
+            cval := rec_coeff.rvv;
+          ELSE
+            cval := 1;
+          END IF;
+          pvol := NULL;
+/*####################################################################################################################*/
+/* Съемка подз. коммуникаций трубокабелеискателем
+/*####################################################################################################################*/
+        WHEN 310 THEN
+          IF sq_type = 1 AND /*(ko = 2 OR nvl(fsource,'N') = 'гз')*/ko_mrr = 2 THEN
+            cval := 1.55;
+          ELSIF sq_type = 2 AND /*(ko = 2 OR nvl(fsource,'N') = 'гз')*/ko_mrr = 2 THEN
+            cval := 1.2;
+          ELSIF sq_type = 3 AND /*(ko = 2 OR nvl(fsource,'N') = 'гз')*/ko_mrr = 2 THEN
+            cval := 1.75;
+          ELSE
+            cval := 1;
+          END IF;
+/*####################################################################################################################*/
+/* Выполнение вертикальной высотной съемки на планах горизонтальной съемки
+/*####################################################################################################################*/
+        WHEN 322 THEN
+          cval := rec_coeff.rvv;
+          pvol := volume;
+/*####################################################################################################################*/
+/* Выпуск материалов в электронном виде
+/*####################################################################################################################*/
+        WHEN 323 THEN
+          SELECT COUNT(id) INTO cnt FROM ppo_ord_attrs WHERE ord_id = ORDID AND NAME = 'ADD_PAPER';
+          IF cnt = 0 AND nvl(conf,'N') = 'N' AND (wname != '785' OR (wname = '785' AND ko_mrr = 1)) THEN
+            cval := rec_coeff.rvv;
+          ELSE
+            cval := 1;
+          END IF;
+          pvol := NULL;
+        WHEN -327 THEN
+          cval := 0.999;
+          pvol := NULL;
+        WHEN 327 THEN
+          SELECT COUNT(id) INTO cnt FROM ppo_ord_attrs WHERE ord_id = ORDID AND NAME = 'ADD_PAPER';
+          IF cnt = 0 AND nvl(conf,'N') = 'N' THEN
+            cval := rec_coeff.rvv;
+          ELSE
+            cval := 1;
+          END IF;
+          pvol := NULL;
+/*####################################################################################################################*/
+/* Остальные коэффициенты
+/*####################################################################################################################*/
+        ELSE
+          cval := rec_coeff.rvv;
+      END CASE;
+/*####################################################################################################################*/
+      IF cval != 1 THEN
+        insert into ppo_smeta_new(ppo_smeta_id, square, coeff_id, real_value) VALUES (rec_coeff.sh_id, pvol,
+          CASE WHEN rec_coeff.cfv IN (-120) THEN 12 ELSE abs(rec_coeff.cfv) END, cval);                                                                         -- Непосредственная вставка коэффициента в смету.
+        pvol := volume;
+      END IF;
+      END LOOP;
+      recalc(p_vld_id, sh_id, p_stg_no);                                                                                                                        -- Расчет и обновление стоимости.
+    end loop;
+    RETURN sh_id;
+  END insert_smeta;
     
     
-    x7 := abs(round(r_ispst*(1 + cNDS) - r_advpay, 2));
+    
