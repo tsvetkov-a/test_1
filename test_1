@@ -1,585 +1,262 @@
-  PROCEDURE GET_RC_PRICE IS
-/*####################################################################################################################*/
-/* Создание работ для ОПС и расчет стоимости
-/*####################################################################################################################*/
-    s  NUMBER := 0;
-    sum_length NUMBER := 0;
-    c1 NUMBER := 0;
-    c2 NUMBER := 0;
-    c3 NUMBER := 0;
-    c4 NUMBER := 0;
-    c5 NUMBER := 0;
-    c6 NUMBER := 0;
-    k  NUMBER := 1;
-    l_cat VARCHAR2(10);
-    l_kind VARCHAR2(10);
-    l_exec PLS_INTEGER;
-    l_measure VARCHAR2(50);
-    curinf PLS_INTEGER;
-    scod PLS_INTEGER;
-    sid PLS_INTEGER;
-    res PLS_INTEGER;
-    sum_s NUMBER;
-    old_vol NUMBER;
-    time_start DATE := SYSDATE;
-    p_bg PLS_INTEGER;
-    p_obj_size NUMBER;
-    p_dot_num PLS_INTEGER;
-    last_smeta PLS_INTEGER;
-
-    FUNCTION get_int_borders(text_int varchar2, border_no pls_integer) return number is
-    begin
-      return to_number(regexp_substr(text_int, '\d+(\.\d+){0,1}', 1, border_no),'FM99999D9','NLS_NUMERIC_CHARACTERS = ''.,''');
-    end get_int_borders;
-
-    FUNCTION get_int_sum(p_s NUMBER, p_bp PLS_INTEGER, out_cod OUT PLS_INTEGER) RETURN NUMBER IS
-      l_c NUMBER;
-    BEGIN
-      FOR rec_a IN (SELECT DISTINCT par_cod,bp_method FROM ref_base_price WHERE group_no = p_bp AND e_date IS NULL) LOOP
-        IF rec_a.bp_method = 'I' AND rec_a.par_cod != 53 THEN
-          FOR rec_b IN (SELECT value_cod,value_text FROM class_param_values WHERE param_cod = rec_a.par_cod AND value_cod IN
-            (SELECT DISTINCT val_cod FROM ref_base_price WHERE group_no = p_bp)) LOOP
-            IF p_s > get_int_borders(rec_b.value_text,1) AND p_s <= NVL(get_int_borders(rec_b.value_text,2),1000000) THEN
-              SELECT DISTINCT cod, base_price INTO out_cod, l_c FROM ref_base_price WHERE group_no = p_bp AND par_cod = rec_a.par_cod AND val_cod = rec_b.value_cod AND e_date IS NULL;
-              RETURN l_c;
-            END IF;
-          END LOOP;
-        END IF;
-      END LOOP;
-      RETURN 0;
-    END get_int_sum;
-
-  BEGIN
-    SELECT id INTO curinf FROM ref_infl WHERE priority = 11 AND nvl(e_date,SYSDATE+1) > SYSDATE;                                                                -- для сметы ОПС берём инфляцию с приоритетом 11 !!!
-/*####################################################################################################################*/
-    FOR rec IN
-      (SELECT c.obj_size, r.base_group FROM cross_ops_com c, ref_com_bgroup r WHERE c.ord_id = ORDID AND nvl(c.rc_id,0) = nvl(r.rc_id,0) and nvl(c.cadd_id,0) = nvl(r.cadd_id,0) AND c.obj_size IS NOT NULL
-      UNION ALL
-      SELECT c.obj_size, NULL base_group FROM cross_ops_com c WHERE c.ord_id = ORDID AND c.rc_id IS NULL AND c.cadd_id IS NULL AND c.obj_size IS NOT NULL
-      ORDER BY base_group nulls LAST) LOOP
-      p_obj_size := rec.obj_size;
-      IF rec.base_group IS NOT NULL THEN                                                                                                                        -- линейный объект
-        p_bg := rec.base_group;
-        sum_length := sum_length + p_obj_size;
-        CASE p_bg
-          WHEN 573 THEN s := p_obj_size;
-          WHEN 574 THEN s := 2 * p_obj_size;
-          WHEN 575 THEN s := 3 * p_obj_size;
-          ELSE s := p_obj_size;
-        END CASE;
-        FOR rec2 IN (SELECT DISTINCT par_cod,bp_method FROM ref_base_price WHERE group_no = p_bg AND e_date IS NULL) LOOP
-          SELECT complex, name, department, measure INTO l_cat, l_kind, l_exec, l_measure FROM class_works WHERE base_group = p_bg AND e_date IS NULL;
-          IF rec2.bp_method = 'I' AND rec2.par_cod != 53 THEN
-            FOR rec3 IN (SELECT value_cod,value_text FROM class_param_values WHERE param_cod = rec2.par_cod AND value_cod IN (SELECT DISTINCT val_cod FROM ref_base_price WHERE group_no = p_bg)) LOOP
-              IF p_obj_size > get_int_borders(rec3.value_text,1) AND p_obj_size <= NVL(get_int_borders(rec3.value_text,2),1000000) THEN
-                old_vol := 0;
-                res := 0;
-                FOR rec4 IN (SELECT id FROM ppo_voldates WHERE ord_id = ORDID AND CATEGORY = l_cat AND kind = l_kind AND executor = l_exec) LOOP
-                  old_vol := old_vol + 1;
-                  res := rec4.id;
-                END LOOP;
-                IF old_vol = 0 THEN
-DBMS_OUTPUT.put_line('Линия. kind = '||l_kind||';volume='||p_obj_size||';new');
-                  insert into ppo_voldates (voldate_type, ord_id, category, kind, executor, value, value_fact, measure, volume, volume_fact, is_working, cancelled, multilines, in_doc, fkp_reestr)
-                    VALUES ('WORK', ORDID, l_cat, l_kind, l_exec, 0, 0, l_measure, 0, 0, 'Y', 'N', 'N', 'N', 'N')
-                    RETURNING id INTO res;
-                  last_smeta := 0;
-                ELSE
-                  SELECT NVL(MAX(smeta_no),0) INTO last_smeta FROM ppo_smeta_header_new WHERE ppo_stages_id = res;
-DBMS_OUTPUT.put_line('Линия. kind = '||l_kind||';volume='||p_obj_size||';id='||res);
-                END IF;
-                SELECT DISTINCT cod, base_price INTO scod, c1 FROM ref_base_price WHERE group_no = p_bg AND par_cod = rec2.par_cod AND val_cod = rec3.value_cod AND e_date IS NULL;
-                sid := insert_smeta(p_vld_id => res, p_type => vc_list('П'), p_no => last_smeta + 1, p_bp_id => scod, sq_type => null,
-                  p_volume => p_obj_size, p_measure => l_measure, p_size_type => 0, p_ki => curinf, p_thin => 0, p_accel => 1, p_coeff_id => n_list(269,270,271), p_stg_no => 0);
-                UPDATE ppo_voldates SET volume = volume + p_obj_size WHERE id = res;
-/*####################################################################################################################*/
-              END IF;
-            END LOOP;
-          END IF;
-        END LOOP;
-      ELSE                                                                                                                                                      -- площадной объект
-        SELECT complex, name, department, measure INTO l_cat, l_kind, l_exec, l_measure FROM class_works WHERE base_group = 577 AND e_date IS NULL;
-        old_vol := 0;
-        res := 0;
-        FOR rec4 IN (SELECT id FROM ppo_voldates WHERE ord_id = ORDID AND CATEGORY = l_cat AND kind = l_kind AND executor = l_exec ORDER BY id) LOOP
-          old_vol := old_vol + 1;
-          res := rec4.id;
-        END LOOP;
-        IF old_vol = 0 THEN
-DBMS_OUTPUT.put_line('Площадь. kind = '||l_kind||';volume='||p_obj_size||';new');
-          INSERT INTO ppo_voldates (voldate_type, ord_id, category, kind, executor, value, value_fact, measure, volume, volume_fact, is_working, cancelled, multilines, in_doc, fkp_reestr)
-            VALUES ('WORK', ORDID, l_cat, l_kind, l_exec, 0, 0, l_measure, 0, 0, 'Y', 'N', 'N', 'N', 'N')
-            RETURNING id INTO res;
-          last_smeta := 0;
-        ELSE
-          SELECT NVL(MAX(smeta_no),0) INTO last_smeta FROM ppo_smeta_header_new WHERE ppo_stages_id = res;
-DBMS_OUTPUT.put_line('Площадь. kind = '||l_kind||';volume='||p_obj_size||';id='||res);
-        END IF;
-        c1 := get_int_sum(p_obj_size,577,scod);
-        sid := insert_smeta(p_vld_id => res, p_type => vc_list('П'), p_no => last_smeta + 1, p_bp_id => scod, sq_type => null,
-          p_volume => p_obj_size, p_measure => l_measure, p_size_type => 0, p_ki => curinf, p_thin => 0, p_accel => 1, p_coeff_id => n_list(269,270,271), p_stg_no => 0);
-        UPDATE ppo_voldates SET volume = volume + p_obj_size WHERE id = res;
-      END IF;
-    END LOOP;
-/*####################################################################################################################*/
-    s := 0;
-    sum_length := 0;
-    FOR rec in (select SUM(c.obj_size) obj_size, r.base_group from cross_ops_com c, ref_com_bgroup r                                                            -- отдельно работа 1004 "Рассмотрение проектов стройгенпланов..."
-      WHERE c.ord_id = ORDID AND nvl(c.rc_id,0) = nvl(r.rc_id,0) and nvl(c.cadd_id,0) = nvl(r.cadd_id,0) AND c.obj_size IS NOT NULL
-      GROUP BY r.base_group) LOOP
-      p_bg := rec.base_group;
-      p_obj_size := rec.obj_size;
-      sum_length := sum_length + p_obj_size;
-      CASE p_bg
-        WHEN 573 THEN s := s + p_obj_size;
-        WHEN 574 THEN s := s + 2 * p_obj_size;
-        WHEN 575 THEN s := s + 3 * p_obj_size;
-        ELSE s := s + p_obj_size;
-      END CASE;
-    END LOOP;
-    IF sum_length > 0 THEN
-      sum_length := sum_length/10000;
-      s := s/10000;
-    END IF;
-    IF sum_length > 0 THEN
-      SELECT complex, name, department, measure INTO l_cat, l_kind, l_exec, l_measure FROM class_works WHERE base_group = 577 AND e_date IS NULL;
-      old_vol := 0;
-      res := 0;
-      FOR rec4 IN (SELECT id FROM ppo_voldates WHERE ord_id = ORDID AND CATEGORY = l_cat AND kind = l_kind AND executor = l_exec ORDER BY id) LOOP
-        old_vol := old_vol + 1;
-        res := rec4.id;
-      END LOOP;
-      IF old_vol = 0 THEN
-DBMS_OUTPUT.put_line('1004. kind = '||l_kind||';volume='||p_obj_size||';new');
-        insert into ppo_voldates (voldate_type, ord_id, category, kind, executor, value, value_fact, measure, volume, volume_fact, is_working, cancelled, multilines, in_doc, fkp_reestr)
-          VALUES ('WORK', ORDID, l_cat, l_kind, l_exec, 0, 0, l_measure, 0, 0, 'Y', 'N', 'N', 'N', 'N')
-          RETURNING id INTO res;
-        last_smeta := 0;
-      ELSE
-        SELECT NVL(MAX(smeta_no),0) INTO last_smeta FROM ppo_smeta_header_new WHERE ppo_stages_id = res;
-DBMS_OUTPUT.put_line('1004. kind = '||l_kind||';volume='||p_obj_size||';id='||res);
-      END IF;
-      c4 := get_int_sum(s,577,scod);
-      sid := insert_smeta(p_vld_id => res, p_type => vc_list('П'), p_no => last_smeta + 1, p_bp_id => scod, sq_type => null,
-        p_volume => sum_length, p_measure => l_measure, p_size_type => 0, p_ki => curinf, p_thin => 0, p_accel => 1, p_coeff_id => n_list(269,270,271), p_stg_no => 0);
-      UPDATE ppo_voldates SET volume = volume + sum_length WHERE id = res;
-    END IF;
-/*####################################################################################################################*/
-    s := 0;
-    sum_length := 0;
-    FOR rec in (select SUM(c.obj_size) obj_size, r.base_group from cross_ops_com c, ref_com_bgroup r                                                            -- отдельно работа 999 "Проверка участка..."
-      WHERE c.ord_id = ORDID AND nvl(c.rc_id,0) = nvl(r.rc_id,0) and nvl(c.cadd_id,0) = nvl(r.cadd_id,0) AND c.obj_size IS NOT NULL
-      GROUP BY r.base_group) LOOP
-      p_bg := rec.base_group;
-      p_obj_size := rec.obj_size;
-      sum_length := sum_length + p_obj_size;
-      CASE p_bg
-        WHEN 573 THEN s := s + p_obj_size;
-        WHEN 574 THEN s := s + 2 * p_obj_size;
-        WHEN 575 THEN s := s + 3 * p_obj_size;
-        ELSE s := s + p_obj_size;
-      END CASE;
-    END LOOP;
-    IF sum_length > 0 THEN
-      sum_length := sum_length/10000;
-      s := s/10000;
-    END IF;
-    FOR rec IN (SELECT SUM(obj_size) obj_size from cross_ops_com WHERE ord_id = ORDID AND rc_id IS NULL AND cadd_id IS NULL AND obj_size IS NOT NULL) LOOP
-      p_obj_size := rec.obj_size;
-      sum_length := sum_length + p_obj_size;
-      s := s + p_obj_size;
-    END LOOP;
-    IF sum_length > 0 THEN
-      SELECT complex, name, department, measure INTO l_cat, l_kind, l_exec, l_measure FROM class_works WHERE base_group = 572 AND e_date IS NULL;
-DBMS_OUTPUT.put_line('999. kind = '||l_kind||';volume='||sum_length||';new');
-      insert into ppo_voldates (voldate_type, ord_id, category, kind, executor, value, value_fact, measure, volume, volume_fact, is_working, cancelled, multilines, in_doc, fkp_reestr)
-        VALUES ('WORK', ORDID, l_cat, l_kind, l_exec, 0, 0, l_measure, sum_length, 0, 'Y', 'N', 'N', 'N', 'N')
-        RETURNING id INTO res;
-      c4 := get_int_sum(s,572,scod);
-      sid := insert_smeta(p_vld_id => res, p_type => vc_list('П'), p_no => 1, p_bp_id => scod, sq_type => null,
-        p_volume => sum_length, p_measure => l_measure, p_size_type => 0, p_ki => curinf, p_thin => 0, p_accel => 1, p_coeff_id => n_list(269,270,271), p_stg_no => 0);
-    END IF;
-/*####################################################################################################################*/
-    sum_length := 0;
-    FOR rec IN (SELECT SUM(dot_num) dot_num from cross_ops_com where ord_id = ORDID AND nvl(dot_num,0) > 0) LOOP                                                -- точечные объекты
-      p_dot_num := rec.dot_num;
-      sum_length := sum_length + p_dot_num;
-    END LOOP;
-    IF sum_length > 0 THEN
-      SELECT complex, name, department, measure INTO l_cat, l_kind, l_exec, l_measure FROM class_works WHERE base_group = 580 AND e_date IS NULL;
-DBMS_OUTPUT.put_line('dots. kind = '||l_kind||';volume='||sum_length||';new');
-      INSERT into ppo_voldates (voldate_type, ord_id, category, kind, executor, value, value_fact, measure, volume, volume_fact, is_working, cancelled, multilines, in_doc, fkp_reestr)
-        VALUES ('WORK', ORDID, l_cat, l_kind, l_exec, 0, 0, l_measure, sum_length, 0, 'Y', 'N', 'N', 'N', 'N')
-        RETURNING id INTO res;
-      SELECT DISTINCT cod, base_price INTO scod, c6 FROM ref_base_price WHERE group_no = 580 AND e_date IS NULL;
-      sid := insert_smeta(p_vld_id => res, p_type => vc_list('П'), p_no => 1, p_bp_id => scod, sq_type => null,
-        p_volume => sum_length, p_measure => l_measure, p_size_type => 0, p_ki => curinf, p_thin => 0, p_accel => 1, p_coeff_id => n_list(269,270,271), p_stg_no => 0);
-    END IF;
-/*####################################################################################################################*/
-    FOR rec IN (SELECT id FROM cross_ops_com c WHERE c.ord_id = ORDID) LOOP                                                                                     -- общие работы к любым объектам
-      SELECT complex, name, department, measure INTO l_cat, l_kind, l_exec, l_measure FROM class_works WHERE base_group = 581 AND e_date IS NULL;
-DBMS_OUTPUT.put_line('1008. kind = '||l_kind||';volume='||sum_length||';new');
-      INSERT INTO ppo_voldates (voldate_type, ord_id, category, kind, executor, value, value_fact, measure, volume, volume_fact, is_working, cancelled, multilines, in_doc, fkp_reestr)
-        VALUES ('WORK', ORDID, l_cat, l_kind, l_exec, 0, 0, l_measure, 1, 0, 'Y', 'N', 'N', 'N', 'N')
-        RETURNING id INTO res;
-      SELECT DISTINCT cod, base_price INTO scod, c2 FROM ref_base_price WHERE group_no = 581 AND e_date IS NULL;
-      sid := insert_smeta(p_vld_id => res, p_type => vc_list('П'), p_no => 1, p_bp_id => scod, sq_type => null,
-        p_volume => 1, p_measure => l_measure, p_size_type => 0, p_ki => curinf, p_thin => 0, p_accel => 1, p_coeff_id => NULL, p_stg_no => 0);
-/*####################################################################################################################*/
-      SELECT complex, name, department, measure INTO l_cat, l_kind, l_exec, l_measure FROM class_works WHERE base_group = 582 AND e_date IS NULL;
-DBMS_OUTPUT.put_line('1009. kind = '||l_kind||';volume='||sum_length||';new');
-      INSERT INTO ppo_voldates (voldate_type, ord_id, category, kind, executor, value, value_fact, measure, volume, volume_fact, is_working, cancelled, multilines, in_doc, fkp_reestr)
-        VALUES ('WORK', ORDID, l_cat, l_kind, l_exec, 0, 0, l_measure, 1, 0, 'Y', 'N', 'N', 'N', 'N')
-        RETURNING id INTO res;
-      SELECT DISTINCT cod, base_price INTO scod, c2 FROM ref_base_price WHERE group_no = 582 AND e_date IS NULL;
-      sid := insert_smeta(p_vld_id => res, p_type => vc_list('П'), p_no => 1, p_bp_id => scod, sq_type => null,
-        p_volume => 1, p_measure => l_measure, p_size_type => 0, p_ki => curinf, p_thin => 0, p_accel => 1, p_coeff_id => NULL, p_stg_no => 0);
-      EXIT;
-    END LOOP;
-  EXCEPTION
-    when others then
-      NULL;
-  END get_rc_price;
-
-
-PROCEDURE make_smeta_complex (comp_in VARCHAR2 DEFAULT NULL) IS
-/*####################################################################################################################*/
-/* Создание сметы на комплекс
-/*####################################################################################################################*/
-    comp_id VARCHAR2(255);
-    l_orglik NUMBER := NULL;
-    l_period NUMBER := NULL;
-    l_ppercent NUMBER := NULL;
-    l_transport NUMBER := NULL;
-    l_payment NUMBER := NULL;
-    l_expense NUMBER := NULL;
-    dist NUMBER := NULL;
-    cyear VARCHAR2(4) := TO_CHAR(SYSDATE,'YYYY');
-    cmp_i PLS_INTEGER := 0;
-    sum_ord NUMBER := 0;
-    min_sum NUMBER := 16843;                                                                                                                                    -- "Минималььно допустимая" стоимость заказа
-    calc_err NUMBER;
-  BEGIN
-    IF comp_in IS NULL THEN
-      SELECT cw.complex INTO comp_id FROM class_works cw JOIN ref_work_cat rwc on cw.id = rwc.cw_id WHERE rwc.part = part_in AND rwc.priority = 1;              -- Вычисляем базовый комплекс работ
-    ELSE
-      comp_id := comp_in;
-    END IF;
-    IF (cnt_surv > 0 AND comp_in IS NULL) OR cnt_tree > 0 THEN                                                                                                  -- Если есть полевые работы, в расчет добавляются коэффициенты:
-      SELECT coeff_value INTO l_orglik FROM ref_coeff WHERE id = 69;                                                                                            -- Организации и ликвидации работ
-      IF /*ko = 2 OR nvl(fsource,'N') = 'гз'*/ko_mrr = 2 THEN
-        SELECT coeff_value INTO l_payment FROM ref_coeff WHERE id = 53;                                                                                         -- Без выплаты полевого довольствия
-      END IF;
-      SELECT coeff_value INTO l_transport FROM ref_coeff WHERE id = 14;                                                                                         -- Внутренний транспорт, исходя из
-      BEGIN
-        SELECT VALUE INTO dist FROM ppo_ord_attrs WHERE ord_id = ORDID AND NAME = 'ADD_OBJ_DISTANCE';                                                           -- расстояния до объекта
-      EXCEPTION
-        WHEN OTHERS THEN
-          dist := NULL;
-      END;
-      IF ko_mrr = 2 THEN
-        IF SYSDATE >= worktime.addworkdays(TO_DATE('20.10.'||cyear,'DD.MM.YYYY'),-5) OR SYSDATE < worktime.addworkdays(TO_DATE('05.05.'||cyear,'DD.MM.YYYY'),-5) THEN
-            SELECT coeff_value INTO l_period FROM ref_coeff WHERE id = 13;                                                                                      -- Неблагоприятный период года
-            l_ppercent := 100;
-        END IF;
-      ELSE
-        IF SYSDATE >= worktime.addworkdays(TO_DATE('20.10.'||cyear,'DD.MM.YYYY'),-5) OR SYSDATE < worktime.addworkdays(TO_DATE('31.03.'||cyear,'DD.MM.YYYY'),-5) THEN
-            l_period := 1.15;                                                                                                                                   -- Неблагоприятный период года
-            l_ppercent := 100;
-        END IF;
-      END IF;
-    END IF;
-    IF nvl(fsource,'N') != 'гз' THEN                                                                                                                            -- Непредвиденные расходы
-      IF ovol < 5 THEN
-        l_expense := 1.3;
-      ELSE
-        l_expense := 1.1;
-      END IF;
-    END IF;
-    FOR rec IN (                                                                                                                                                -- Здесь используется цикл для создания смет на каждый номер этапа
-      SELECT NO FROM ppo_voldates WHERE voldate_id IN (SELECT id FROM ppo_voldates WHERE ord_id = ORDID) GROUP BY NO                                            -- или на заказ целиком. Сметы предварительная и исполниительная.
-      UNION
-      SELECT NO FROM ppo_voldates WHERE ord_id = ORDID GROUP BY NO
-      ORDER BY NO nulls LAST
-    ) LOOP
-      cmp_i := cmp_i + 1;
-      IF cmp_i > 1 AND rec.NO IS NULL THEN EXIT; END IF;                                                                                                        -- Если сметы на этапы уже созданы, выходим, не создавая смету на заказ.
-      INSERT INTO ppo_smeta_new_complex (SMETA_TYPE, K_INFL_SEC, K_INFL_PERCENT, K_ACCEL, ACCEL_TYPE, K_INFL, COMPLEX_ID, ORD_ID, NO, K_ORGLIK, K_PERIOD, K_TRANSPORT, PERIOD_PERCENT, K_PAYMENT, DISTANCE, K_EXPENSE)
-        VALUES ('П', NULL, 100, curacc, acctype, curinf, comp_id, ORDID, rec.no,
-        CASE WHEN NVL(rec.NO,'0') = '2' THEN NULL ELSE l_orglik END,                                                                                            -- Общие полевые коэффициенты не добавляются во второй этап.
-        CASE WHEN NVL(rec.NO,'0') = '2' THEN NULL ELSE l_period END,                                                                                            -- Общие полевые коэффициенты не добавляются во второй этап.
-        CASE WHEN NVL(rec.NO,'0') = '2' THEN NULL ELSE l_transport END,                                                                                         -- Общие полевые коэффициенты не добавляются во второй этап.
-        CASE WHEN NVL(rec.NO,'0') = '2' THEN NULL ELSE l_ppercent END,                                                                                          -- Общие полевые коэффициенты не добавляются во второй этап.
-        CASE WHEN NVL(rec.NO,'0') = '2' THEN NULL ELSE l_payment END,                                                                                           -- Общие полевые коэффициенты не добавляются во второй этап.
-        CASE WHEN NVL(rec.NO,'0') = '2' THEN NULL ELSE dist END,                                                                                                -- Расстояние до объекта не добавляется во второй этап.
-        CASE WHEN NVL(rec.NO,'0') = '2' THEN l_expense ELSE NULL END);
-      calc_cost_real_new(ORDID, calc_err);                                                                                                                      -- Пришлось вставить между сметами расчет реальных стоимостей!
-      INSERT INTO ppo_smeta_new_complex (SMETA_TYPE, K_INFL_SEC, K_INFL_PERCENT, K_ACCEL, ACCEL_TYPE, K_INFL, COMPLEX_ID, ORD_ID, NO, K_ORGLIK, K_PERIOD, K_TRANSPORT, PERIOD_PERCENT, K_PAYMENT, DISTANCE, K_EXPENSE)
-        VALUES ('И', NULL, 100, curacc, acctype, curinf, comp_id, ORDID, rec.no,
-        CASE WHEN NVL(rec.NO,'0') = '2' THEN NULL ELSE l_orglik END,
-        CASE WHEN NVL(rec.NO,'0') = '2' THEN NULL ELSE l_period END,
-        CASE WHEN NVL(rec.NO,'0') = '2' THEN NULL ELSE l_transport END,
-        CASE WHEN NVL(rec.NO,'0') = '2' THEN NULL ELSE l_ppercent END,
-        CASE WHEN NVL(rec.NO,'0') = '2' THEN NULL ELSE l_payment END,
-        CASE WHEN NVL(rec.NO,'0') = '2' THEN NULL ELSE dist END,
-        CASE WHEN NVL(rec.NO,'0') = '2' THEN l_expense ELSE NULL END);                                                                                          -- Непредвиденные расходы добавляются только во второй этап.
-    END LOOP;
-    IF nvl(fsource,'N') != 'гз' AND cnt_surv > 0 AND oscale in ('1','2') THEN                                                                                   -- Для 200-ки и 500-ки не по Госзаданию и при наличии полевых работ следует проверять конечную стоимость
-      SELECT SUM(VALUE) INTO sum_ord FROM ppo_smeta_new_complex WHERE ord_id = ORDID AND complex_id = comp_id AND smeta_type = 'П';                             -- заказа (с учетом всех коэффициентов, но без учета НДС) и, если стоимость менее min_sum, требуется применить
-      IF sum_ord < min_sum THEN                                                                                                                                 -- дополнительный к-т для увеличения стоимости заказа до этой суммы и сохранить это значение в поле "договорной к-т".
-        UPDATE ppo_smeta_new_complex SET k_accel = ROUND(NVL(k_accel,1) * (min_sum / NVL(sum_ord,1)),4) WHERE ord_id = ORDID AND complex_id = comp_id;          -- Значение к-та рассчитывается по формуле k_accel=min_sum/Стоимость заказа.
-      END IF;                                                                                                                                                   -- Если значение k_accel до пересчета уже было заполнено, то значения старого к-та и нового
-    END IF;                                                                                                                                                     -- перемножаются  и сохраняется пересчитанное значение.
-    calc_cost_real_new(ORDID, calc_err);
-  END make_smeta_complex;
-  
-  
-  PROCEDURE put_terr_comp_sq (ORDID PLS_INTEGER, part_in VARCHAR2 DEFAULT '0101') IS
-/*####################################################################################################################*/
-/* Заполнение временной таблицы PPO_SMETA_TERR матрицей площадей пересечений каждого контура заказа со всеми типами
-/* баланса территорий + спецрежимом + ЛЭП + дорогами + тонкими линиями + мостами + гидрографией + отдельно застроенной/
-/* незастроенной территориями.
-/*####################################################################################################################*/
+PROCEDURE add_3_otd_prd (vd_in pls_integer) IS
+vtype varchar2(4);
+vid pls_integer;
+oid pls_integer;
+is_wrk pls_integer;
+is_wrk1 pls_integer;
+is_wrk2 pls_integer;
+is_wrk3 pls_integer;
+is_wrk4 pls_integer;
+is_wrk5 pls_integer;
+is_5 pls_integer;
+is_do pls_integer;
+is_785 pls_integer;
+is_371 pls_integer;
+is_926 pls_integer;
+is_kl PLS_INTEGER;
+is_stg pls_integer;
+vvol_153 number;
+vvol number;
+ovol number;
+is_sec varchar2(1);
+sdate date;
+edate date;
+aper date;
+sdate_207 date;
+edate_207 date;
+aper_207 date;
+edate_100 date;
+aper_100 date;
+sdate_210668 date;
+edate_210668 date;
+aper_210668 date;
+sdate_210668w date;
+edate_210668w date;
+aper_210668w date;
+ater varchar2(1);
+reg varchar2(1);
+edate_371 date;
+aper_371 date;
+sd_134st2 date;
+ed_134st2 date;
+aper_134st2 date;
+sd_856st2 date;
+ed_856st2 date;
+aper_856st2 date;
+roid pls_integer;
+reid pls_integer;
+s1_cnt NUMBER;
+fs VARCHAR2(10);
+duty_d date;
+is_brd PLS_INTEGER;
+is_ngu pls_integer;
+ngu_vol NUMBER;
+cnt_877 NUMBER;
 BEGIN
-  FOR rec0 IN (SELECT id, c_mslink, contour FROM ppo_contours WHERE ord_id = ORDID) LOOP
-    FOR rec1 IN (SELECT value_cod FROM class_param_values WHERE param_cod = '2' AND value_cod > 0) LOOP
-      FOR rec2 IN (SELECT value_cod FROM class_param_values WHERE param_cod = '1' AND value_cod BETWEEN 1 AND 3) LOOP
-        INSERT INTO ppo_smeta_terr (cnt_id, cnt_square, CATEGORY, terr_type, square, spec, lep, road, thin_stripe, bridges, bridges2, water, z, n, n1)
-          SELECT
-            rec0.id,
-            round(square_gra/10000,2),
-            rec2.value_cod,
-            rec1.value_cod,
-            get_cont_part(rec0.id, rec1.value_cod, rec2.value_cod),
-            get_cont_part(rec0.id, rec1.value_cod, rec2.value_cod, 'L'),
-            get_cont_part(rec0.ID, rec1.value_cod, rec2.value_cod, 'LEP'),
-            get_cont_part(rec0.ID, rec1.value_cod, rec2.value_cod, 'D'),
-            CASE WHEN part_in LIKE '02%' THEN                                                                                                                   -- Приходится делать развилку для 2000-ка - здесь другая ширина узкой полосы.
-            get_cont_part(rec0.ID, rec1.value_cod, rec2.value_cod, 'T2000')
-            ELSE
-            get_cont_part(rec0.ID, rec1.value_cod, rec2.value_cod, 'T')
-            END,
-            get_cont_part(rec0.id, rec1.value_cod, rec2.value_cod, 'B'),
-            get_cont_part(rec0.id, rec1.value_cod, rec2.value_cod, 'B2'),
-            get_cont_part(rec0.ID, rec1.value_cod, rec2.value_cod, 'W'),
-            get_cont_part(rec0.ID, rec1.value_cod, rec2.value_cod, 'Z'),
-            get_cont_part(rec0.ID, rec1.value_cod, rec2.value_cod, 'N'),
-            get_cont_part(rec0.ID, rec1.value_cod, rec2.value_cod, 'N1')
-          from centroid_ppo where mslink = rec0.c_mslink;
-      END LOOP;
-    END LOOP;
-  END LOOP;
-  IF part_in LIKE '02%' THEN                                                                                                                                    -- Для 2000-ка вся территория промпредприятий меняется на застроенную.
-    FOR rec IN (SELECT cnt_id, CATEGORY, terr_type, square, spec, lep, road, thin_stripe, bridges, bridges2, water, z, n, n1 FROM ppo_smeta_terr WHERE terr_type = '3' AND square > 0) LOOP
-      UPDATE ppo_smeta_terr SET square = square + rec.square, spec = spec + rec.spec, lep = lep + rec.lep, road = road + rec.road, thin_stripe = thin_stripe + rec.thin_stripe,
-        bridges = bridges + rec.bridges, bridges2 = bridges2 + rec.bridges2, water = water + rec.water, z = z + rec.z, n = n + rec.n, n1 = n1 + rec.n1
-        WHERE cnt_id = rec.cnt_id AND CATEGORY = rec.CATEGORY AND terr_type = '1';
-      UPDATE ppo_smeta_terr SET square = 0, spec = 0, lep = 0, road = 0, thin_stripe = 0, bridges = 0, bridges2 = 0, water = 0, z = 0, n = 0, n1 = 0 WHERE cnt_id = rec.cnt_id AND CATEGORY = rec.CATEGORY AND terr_type = '3';
-    END LOOP;
-  END IF;
-  UPDATE ppo_smeta_terr SET sq_overp = square - bridges - bridges2;                                                                                             -- Столбец для облегчения последующих расчетов площадей без мостов.
-  IF USER IN ('PPO','AKALINICHENKO') THEN                                                                                                                       -- Копия временной таблицы перебрасывается в аналогичную постоянную
-    DELETE ppo_smeta_terr_solid;                                                                                                                                -- для возможности дальнейшего анализа.
-    INSERT INTO ppo_smeta_terr_solid (cnt_id,cnt_square,CATEGORY,terr_type,square,spec,lep,road,thin_stripe,bridges,bridges2,water,z,n,n1,sq_overp)
-      SELECT cnt_id,cnt_square,CATEGORY,terr_type,square,spec,lep,road,thin_stripe,bridges,bridges2,water,z,n,n1,sq_overp FROM ppo_smeta_terr;
-  END IF;
-END;
-
-
-  PROCEDURE recalc(vid pls_integer, sid PLS_INTEGER, sno VARCHAR2 DEFAULT NULL) IS
-/*####################################################################################################################*/
-/* Процедура пересчета сметы/работы, взята из стандартной сметы, использует сметные пакеты
-/*####################################################################################################################*/
-    itog2 number;
-    itog number;
-    s0 number;
-    infl1_itog number;
-    infl2_itog number;
-    itog1 number;
-    nds number;
-    itog3 number;
-    pvalue number;
-    kvalue number;
-    partkl number;
-    parttr number;
-    partko NUMBER;
-    parttrp number;
-    parttrk number;
-    pvaluereal number;
-    kvaluereal number;
-    smeta_value NUMBER;
-    worktype VARCHAR2(30);
-    workcomp VARCHAR2(30);
-    workorder NUMBER;
-    stype VARCHAR2(1);
-  BEGIN
-    select smeta_type into stype from ppo_smeta_header_new where id = sid;
-    smeta_value := put_smeta(sid,itog,s0,infl1_itog,infl2_itog,itog1,nds,itog3,pvalue,kvalue,partkl,parttr,partko,parttrp,parttrk,pvaluereal,kvaluereal);
-    SELECT ord_id, category, kind into workorder, workcomp, worktype from ppo_voldates where id = vid;
-    IF worktype = 'пво' then
-      update ppo_smeta_header_new
-        set value = smeta_value, p_value = (pvalue + kvalue), k_value = 0, part_kl = partkl, part_ko = partko, part_tr = parttr, part_tr_p = parttrp, part_tr_k = parttrk, p_value_real = pvaluereal, k_value_real = kvaluereal
-        where id = sid;
-    else
-      update ppo_smeta_header_new
-        set value = smeta_value, p_value = pvalue, k_value = kvalue, part_kl = partkl, part_ko = partko, part_tr = parttr, part_tr_p = parttrp, part_tr_k = parttrk, p_value_real = pvaluereal, k_value_real = kvaluereal
-        where id = sid;
-    END if;
-    DECLARE
-      cnt number;
-          print_cat varchar2(5) := NULL;
-    BEGIN
-      FOR rec1 IN (SELECT CATEGORY FROM ppo_voldates WHERE ord_id = workorder AND kind = '985') LOOP
-        print_cat := rec1.CATEGORY;
-        EXIT;
-      END LOOP;
-      IF print_cat IS NOT NULL THEN
-            if workcomp = print_cat then
-              update ppo_smeta_header_new set part_prnt = round(k_value * 0.055) where id = sid;
-            end if;
-      end if;
-    END;
-        IF stype = 'П' THEN
-             UPDATE ppo_voldates SET VALUE = nvl(VALUE,0) + NVL(smeta_value,0) WHERE id = vid;
-             IF sno IS NOT NULL THEN
-               UPDATE ppo_voldates SET VALUE = nvl(VALUE,0) +  NVL(smeta_value,0) WHERE voldate_id = vid AND NO = sno;
-         END IF;
-    ELSE
-             UPDATE ppo_voldates SET VALUE_FACT = NVL(value_fact,0) + NVL(smeta_value,0) WHERE id = vid;
-             IF sno IS NOT NULL THEN
-           UPDATE ppo_voldates SET VALUE_FACT = NVL(value_fact,0) + NVL(smeta_value,0) WHERE voldate_id = vid AND NO = sno;
-             END IF;
-    END IF;
---      COMMIT;
-  END recalc;
-  
-  
-   PROCEDURE TERR_CALC (work_id PLS_INTEGER, l_vol NUMBER, totvol NUMBER, thin_stripe NUMBER, water NUMBER, sm_num NUMBER, spec NUMBER, cat NUMBER, ttype NUMBER, adc VARCHAR2, bgroup NUMBER, sm_type PLS_INTEGER, cid n_list, cadd vc_list, rvalue n_list, sno NUMBER, bpr NUMBER DEFAULT NULL) IS
-/*####################################################################################################################*/
-/* Повторяющаяся процедура "обвязки" (расчёт базовой ставки и добавление сметы).
-/*####################################################################################################################*/
-    part_s NUMBER := 0;
-    q VARCHAR2(2000);
-    bp_cod NUMBER;
-    sid PLS_INTEGER;
-  BEGIN
---  dbms_output.put_line('group='||bgroup||';cat='||cat||';ttype='||ttype||';ko_mrr='||ko_mrr||';ko='||ko||';adc='||adc);
-    IF NOT (k_397 < 1 AND water > 0) THEN                                                                                                                       -- Расчёт игнорируется, когда работа 397 (трубокабелеискатель) и есть вода.
-      i := i + 1;
-      IF i = sm_num THEN                                                                                                                                        -- Если рассматривается последняя смета по типам территорий,
-        part_s := totvol - sum_s;                                                                                                                               -- её объём определяется вычитанием сумм объёмов предыдущих смет из общего объёма работы.
-      ELSE
-        part_s := l_vol;
-      END IF;
-      IF part_s > 0 THEN
-        sum_s := sum_s + part_s;
-        IF bpr IS NULL /*AND part_in NOT IN ('0201','0202')*/ THEN                                                                                                  -- Входящий параметр базовой ставки. Прописан в REF_WORK_CAT. Если пусто,
-          q := 'SELECT cod FROM ref_base_price WHERE group_no = :bg AND par_cod = ''1'' AND val_cod = '||cat||' AND e_date IS NULL '||                          -- надо вычислять по сочетанию группы базовых цен, и параметров
-               'INTERSECT '||                                                                                                                                   -- типа территории и категории сложности.
-               'SELECT cod FROM ref_base_price WHERE group_no = :bg AND par_cod = ''2'' AND val_cod = '||ttype||' AND e_date IS NULL '||
-               'INTERSECT '||                                                                                                                                   -- бюджет/не бюджет.
-               'SELECT cod FROM ref_base_price WHERE group_no = :bg AND par_cod = ''53'' AND val_cod = '||ko_mrr||' AND e_date IS NULL';
-          if adc is not null THEN                                                                                                                               -- Если в REF_WORK_CAT поле ADD_COND заполнено, его значение добавляется
-            EXECUTE IMMEDIATE q || ' ' || adc INTO bp_cod USING bgroup,bgroup,bgroup,bgroup;                                                                    -- в условие нахождения базовой ставки.
-          else
-            EXECUTE IMMEDIATE q INTO bp_cod USING bgroup,bgroup,bgroup;
-          end if;
-/*        ELSIF bpr IS NULL AND part_in IN ('0201','0202') THEN                                                                                                  -- Входящий параметр базовой ставки. Прописан в REF_WORK_CAT. Если пусто,
-          q := 'SELECT cod FROM ref_base_price WHERE group_no = :bg AND par_cod = ''1'' AND val_cod = '||cat||' AND e_date IS NULL '||                          -- надо вычислять по сочетанию группы базовых цен, и параметров
-               'INTERSECT '||                                                                                                                                   -- типа территории и категории сложности.
-               'SELECT cod FROM ref_base_price WHERE group_no = :bg AND par_cod = ''2'' AND val_cod = '||ttype||' AND e_date IS NULL';
-          if adc is not null THEN                                                                                                                               -- Если в REF_WORK_CAT поле ADD_COND заполнено, его значение добавляется
-            EXECUTE IMMEDIATE q || ' ' || adc INTO bp_cod USING bgroup,bgroup,bgroup;                                                                           -- в условие нахождения базовой ставки.
-          else
-            EXECUTE IMMEDIATE q INTO bp_cod USING bgroup,bgroup;
-          end if;*/
-        ELSE                                                                                                                                                    -- Если же параметр задан, он является кодом базовой ставки.
-          bp_cod := bpr;
-        END IF;
-        IF thin_stripe = 0 THEN                                                                                                                                 -- Территория без узких линий.
-          sid := insert_smeta(p_vld_id => work_id, p_type => vc_list('П'), p_no => i, p_bp_id => bp_cod, sq_type => ttype, p_volume => part_s, p_measure => l_measure,
-            p_size_type => sm_type, p_ki => curinf, p_thin => 0, p_accel => 1, p_coeff_id => cid, p_coeff_add => cadd, p_real_value => rvalue, p_spec => spec, p_stg_no => sno);
-        ELSE                                                                                                                                                    -- Территория с узкими линиями.
-          sid := insert_smeta(p_vld_id => work_id, p_type => vc_list('П'), p_no => i, p_bp_id => bp_cod, sq_type => ttype, p_volume => part_s, p_measure => l_measure,
-            p_size_type => sm_type, p_ki => curinf, p_thin => thin_stripe, p_accel => 1, p_coeff_id => cid, p_coeff_add => cadd, p_real_value => rvalue, p_spec => spec, p_stg_no => sno);
-        END IF;
-        IF water > 0 THEN
+    vd := vd_in;
+    SELECT voldate_type into vtype from ppo_voldates where id = vd_in;
+    if vtype = 'STG' then
+        SELECT s.voldate_id, w.ord_id, s.volume, s.s_date, s.e_date, s.accel_per
+            into vid, oid, vvol, sdate, edate, aper
+            from ppo_voldates s, ppo_voldates w where s.id = vd_in and w.id = s.voldate_id;
         BEGIN
-          INSERT INTO ppo_smeta_new (ppo_smeta_id, coeff_id, square, real_value) VALUES (sid, 132, water, 0.5);                                                 -- Добавляем на воду коэффициент обновления.
+            select s.s_date,s.e_date,s.accel_per
+               into sd_134st2,ed_134st2,aper_134st2
+               from ppo_voldates s,ppo_voldates w
+               where w.ord_id = oid and w.kind = '134' and w.id = s.voldate_id and s.no = '2';
         EXCEPTION
-          WHEN OTHERS THEN
-            NULL;
+            when others then
+               null;
         END;
-        END IF;
-      END IF;
-    END IF;
-  END;
-  
-  
- PROCEDURE work_assort (ORDID PLS_INTEGER, part_in VARCHAR2 DEFAULT '0101') IS
-/*####################################################################################################################*/
-/* Основная рабочая процедура пакета. Создает работы и сметы в заказе на основании заданных параметров (идентификатор
-/* заказа и вид сметы). Львиную долю процедуры занимает расчет базовой ставки сметы путем исполнения для каждой работы
-/* динамических запросов из справочника REF_WORK_VOLUME*.
-/* Состоит из нескольких вложенных функций/процедур.
-/* * Памятка по расчету базовой стоимости будет приведена в конце пакета.
-/*####################################################################################################################*/
-  TYPE pars IS VARRAY(100) OF VARCHAR2(5);
-  TYPE vals IS VARRAY(100) OF NUMBER;
-  par_list     pars := pars();
-  val_list     vals := vals();
-  i            PLS_INTEGER := 0;
-  ko           NUMBER;
-  ko_mrr       NUMBER;
-  ovol         NUMBER;
-  are_id       PLS_INTEGER;
-  wid          PLS_INTEGER;
-  sid          PLS_INTEGER;
-  ex           VARCHAR2(1);
-  ater         VARCHAR2(1);
-  reg          VARCHAR2(1);
-  fsource      VARCHAR2(5);
-  ekoeff       NUMBER;
-  cnt          PLS_INTEGER;
-  vol_397      NUMBER := 0;
-  k_397        NUMBER(5,2) := 1;
-  k_397_old    NUMBER(5,2) := 1;
-  q            VARCHAR2(4000);
-  formula      VARCHAR2(4000);
-  ono          VARCHAR2(255);
-  volu         NUMBER;
-  scod         NUMBER;
-  vol_w        NUMBER := 0;
-  sum_s        NUMBER := 0;
-  part_s       NUMBER;
-  curinf       PLS_INTEGER;
-  curacc       NUMBER;
-  acctype      VARCHAR2(5);
-  volu_tot     NUMBER;
-  is_132       PLS_INTEGER;
-  max_132      PLS_INTEGER;
-  spec         NUMBER;
-  l_cao        NUMBER;
-  spec_tot     NUMBER;
-  gidr_tot     NUMBER;
-  most_tot     NUMBER;
-  n_tot        NUMBER;
-  n1_tot       NUMBER;
-  num_s        PLS_INTEGER;
-  oscale       VARCHAR2(5);
-  pid          PLS_INTEGER;
-  l_measure    VARCHAR2(50);
-  l_base_group NUMBER;
-  conf         VARCHAR2(1);
-  cnt_prev_ord NUMBER := 0;
-  cnt_overp    NUMBER := 0;
-  vol_overp    NUMBER := 0;
-  cnt_brdg     NUMBER := 0;
-  bound_1      NUMBER;
-  bound_2      NUMBER;
-  cnt_re_lgr   NUMBER := 0;
-  cnt_re_ko    NUMBER := 0;
-  cnt_tree     NUMBER := 0;
-  cnt_reoutput NUMBER := 0;
-  cnt_surv     NUMBER := 0;
-  calc_err     NUMBER;
+        BEGIN
+            SELECT s.s_date,s.e_date,s.accel_per
+               into sd_856st2,ed_856st2,aper_856st2
+               from ppo_voldates s,ppo_voldates w
+               where w.ord_id = oid and w.kind = '856' and w.id = s.voldate_id and s.no = '2';
+        EXCEPTION
+            when others then
+               null;
+        END;
+    ELSE
+        SELECT ord_id, volume, s_date, e_date, accel_per
+            INTO oid, vvol, sdate, edate, aper
+            FROM ppo_voldates where id = vd_in;
+        vid := vd_in;
+    END if;
+    select round(sum(square_gra)/10000,2) into ovol from centroid_ppo where numberarea = oid;
+    select confident,att_terr,region,fin_source,duty_date into is_sec,ater,reg,fs,duty_d from ppo_orders where id = oid;
+    select count(id) into is_5 from ppo_voldates where kind in ('105') and /*executor = 200339 and*/ ord_id = oid;
+    select count(id) into is_wrk from ppo_voldates where kind in ('100','101') and /*executor = 200339 and*/ ord_id = oid;
+    select count(id) into is_kl from ppo_voldates where kind in ('200','967') and /*executor = 200339 and*/ ord_id = oid;
+    select count(id) into cnt_877 from ppo_voldates where kind in ('877') and /*executor = 200339 and*/ ord_id = oid;
+    if is_wrk > 0 then
+        begin
+            select e_date, accel_per into edate_100, aper_100 from ppo_voldates where kind in ('100','101') and /*executor = 200339 and*/ ord_id = oid;
+        exception
+            when others then
+                edate_100 := null;
+                aper_100 := null;
+        end;
+        SELECT COUNT(id) INTO s1_cnt FROM ppo_voldates WHERE NO = '1' AND voldate_id IN (SELECT id FROM ppo_voldates WHERE ord_id = oid);
+    end if;
+    select count(id) into is_do from ppo_voldates where kind in ('808','207','215') and /*executor = 200339 and*/ ord_id = oid;
+    if is_do > 0 then
+        begin
+            select e_date, accel_per into edate_207, aper_207 from ppo_voldates where kind in ('808','207','215') and /*executor = 200339 and*/ ord_id = oid;
+        exception
+            when others then
+                edate_207 := null;
+                aper_207 := null;
+        end;
+    end if;
+    begin
+        select s_date, e_date, accel_per into sdate_210668, edate_210668, aper_210668 from ppo_voldates where kind in ('132','159','421') and /*executor = 200339 and*/ ord_id = oid;
+    exception
+        when no_data_found then
+            sdate_210668 := null;
+            edate_210668 := null;
+            aper_210668 := null;
+        when too_many_rows then
+--          for rec132 in (select s_date, e_date, accel_per from ppo_voldates where kind in ('132','159','421') and executor = 200347 and ord_id = oid order by nvl(e_date_fact,accel_per) desc) loop
+            for rec132 in (select id, s_date, e_date, accel_per from ppo_voldates where kind in ('132','159','421') and /*executor = 200339 and*/ ord_id = oid order by nvl(e_date_fact,accel_per) asc) loop
+                for rec132_s in (select s_date,e_date,accel_per from ppo_voldates where voldate_id = rec132.id order by no) loop
+                    sdate_210668 := rec132_s.s_date;
+                    edate_210668 := rec132_s.e_date;
+                    aper_210668 := rec132_s.accel_per;
+                    exit;
+                end loop;
+                sdate_210668w := rec132.s_date;
+                edate_210668w := rec132.e_date;
+                aper_210668w := rec132.accel_per;
+            end loop;
+            if sdate_210668 is null then
+                sdate_210668 := sdate_210668w;
+                edate_210668 := edate_210668w;
+                aper_210668 := aper_210668w;
+            end if;
+    end;
+    select count(id) into is_371 from ppo_voldates where kind in ('371') and ord_id = oid;
+    if is_371 > 0 then
+        for rec371 in (select e_date, accel_per from ppo_voldates where kind in ('371') and /*executor = 200339 and*/ ord_id = oid order by nvl(e_date_fact,accel_per) desc) loop
+            edate_371 := rec371.e_date;
+            aper_371 := rec371.accel_per;
+            exit;
+        end loop;
+        select count(id) into is_stg from ppo_voldates where voldate_id in
+            (select id from ppo_voldates where ord_id = oid);
+    end if;
+    if is_wrk > 0 then
+        auto_prd_rec_ugp ('ПТ', 235, 200374, 'га', ovol);
+        if sdate is not null and edate is not null then
+            IF aper is not null then
+                auto_prd_rec_ugp ('ПТ', 353, 201769, 'га', vvol,
+                    sdate, addworkdays(sdate, ceil(getworkdays(edate,sdate)/2)), addworkdays(sdate, ceil((getworkdays(aper,sdate)-1)/2)));
+            else
+                auto_prd_rec_ugp ('ПТ', 353, 201769, 'га', vvol, sdate, addworkdays(sdate, ceil(getworkdays(edate,sdate)/2)));
+            end if;
+        else
+            auto_prd_rec_ugp ('ПТ', 353, 201769, 'га', vvol);
+        end if;
+        IF sdate is not null and edate is not null then
+            if aper is not null then
+                auto_prd_rec_ugp ('ПТ', 274, 203500, 'га', vvol,
+                    sdate, addworkdays(sdate, ceil(getworkdays(edate,sdate)/2)), addworkdays(sdate, ceil((getworkdays(aper,sdate)-1)/2)));
+            else
+                auto_prd_rec_ugp ('ПТ', 274, 203500, 'га', vvol, sdate, addworkdays(sdate, ceil(getworkdays(edate,sdate)/2)));
+            end if;
+        else
+            auto_prd_rec_ugp ('ПТ', 274, 203500, 'га', vvol);
+        end if;
+        IF (is_wrk > 0 or is_5 > 0) and sdate is not null and edate is not null then
+            if aper is not null then
+                auto_prd_rec_ugp ('КТ', 198, 201773, 'га', ovol,
+                    addworkdays(addworkdays(sdate,1), ceil(getworkdays(edate,sdate)/2)),addworkdays(edate, -1),addworkdays(aper, -1));
+            else
+                auto_prd_rec_ugp ('КТ', 198, 201773, 'га', ovol,
+                    addworkdays(addworkdays(sdate,1), ceil(getworkdays(edate,sdate)/2)),addworkdays(edate, -1));
+            end if;
+        ELSIF   is_wrk = 0 and is_5 = 0 and sdate is not null and edate is not null then
+            if aper is not null then
+                auto_prd_rec_ugp ('КТ', 198, 201773, 'га', ovol, sdate, addworkdays(edate, -1), addworkdays(aper, -1));
+            else
+                auto_prd_rec_ugp ('КТ', 198, 201773, 'га', ovol, sdate, addworkdays(edate, -1));
+            end if;
+        ELSE
+            auto_prd_rec_ugp ('КТ', 198, 201773, 'га', ovol);
+        end if;
+        --ACDOG-678
+        if (is_wrk > 0 or is_5 > 0) and nvl(is_sec,'N')='N' then
+            auto_prd_rec_ugp ('ОТЧ', 238, 20552633, 'отчет');
+        end if;
+        IF sdate is not null and edate is not null then
+            if aper is not null then
+                auto_prd_rec_ugp ('ККТ', 119, 201780, 'га', ovol, edate, edate, aper);
+            else
+                auto_prd_rec_ugp ('ККТ', 119, 201780, 'га', ovol, edate, edate);
+            end if;
+        else
+            auto_prd_rec_ugp ('ККТ', 119, 201780, 'га', ovol);
+        end if;
+        IF vtype = 'STG' and (ater = 'Y' OR reg = 'Y') then
+            auto_prd_rec_ugp ('КР', 178, 201850, 'га', ovol, NULL, addworkdays(edate_371,-3), addworkdays(aper_371,-3));
+        else
+            IF edate_210668 is not null then
+                IF aper_210668 is not null then
+                    auto_prd_rec_ugp ('КР', 178, 201850, 'га', ovol, edate_210668, edate_210668, aper_210668);
+                else
+                    auto_prd_rec_ugp ('КР', 178, 201850, 'га', ovol, edate_210668, edate_210668, aper);
+                end if;
+            else
+                auto_prd_rec_ugp ('КР', 178, 201850, 'га', ovol);
+            end if;
+        end if;
+        IF edate_210668 is not null then
+            if nvl(ovol,0) >= 10 then
+                IF aper_210668 is not null then
+                    auto_prd_rec_ugp ('КП', 400, 201850, 'га', ovol, edate_210668, edate_210668, aper_210668);
+                else
+                    auto_prd_rec_ugp ('КП', 400, 201850, 'га', ovol, edate_210668, edate_210668, aper);
+                end if;
+            else
+                IF aper_210668 is not null then
+                    auto_prd_rec_ugp ('КП', 400, 201850, 'га', ovol, addworkdays(edate_210668,-1), addworkdays(edate_210668,-1), addworkdays(aper_210668,-1));
+                else
+                    auto_prd_rec_ugp ('КП', 400, 201850, 'га', ovol, addworkdays(edate_210668,-1), addworkdays(edate_210668,-1), addworkdays(aper,-1));
+                end if;
+            end if;
+        else
+            auto_prd_rec_ugp ('КП', 400, 201850, 'га', ovol);
+        end if;
+        IF aper_100 is not null then
+            auto_prd_rec_ugp ('КП', 148, 201850, 'га', ovol, addworkdays(edate_100,2), addworkdays(edate_100,3), addworkdays(aper_100,3));
+        else
+            auto_prd_rec_ugp ('КП', 148, 201850, 'га', ovol, addworkdays(edate_100,2), addworkdays(edate_100,3));
+        end if;
+        if ater = 'Y' or reg = 'Y' then
+            IF vtype = 'STG' and nvl(ovol,0) <= 25 then
+                auto_prd_rec_ugp ('ККП', 301, 214622, 'га', ovol, edate_210668, addworkdays(edate_371,-6), addworkdays(aper_371,-6));
+            ELSIF vtype = 'STG' and nvl(ovol,0) > 25 then
+                auto_prd_rec_ugp ('ККП', 301, 214622, 'га', ovol, edate_210668, addworkdays(edate_371,-7), addworkdays(aper_371,-9));
+            end if;
+        end if;
+        IF vtype = 'STG' and sd_134st2 is not null then
+            if aper_134st2 is not null then
+                auto_prd_rec_ugp ('ВВ', 210, 200374, 'га', ovol, sd_134st2, ed_134st2, aper_134st2);
+            else
+                auto_prd_rec_ugp ('ВВ', 210, 200374, 'га', ovol, sd_134st2, ed_134st2);
+            end if;
+        else
+            if edate_210668 is not null then
+                IF aper_207 is null and aper_210668 is not null then
+                    auto_prd_rec_ugp ('ВВ', 210, 200374, 'га', ovol, addworkdays(edate_210668,1), addworkdays(edate_210668,1), aper_210668);
+                ELSIF aper_207 is not null and aper_210668 is not null and abs(getworkdays(aper_207,aper_210668)) <= 1 then
+                    auto_prd_rec_ugp ('ВВ', 210, 200374, 'га', ovol, addworkdays(edate_210668,1), addworkdays(edate_210668,1), aper_210668);
+                ELSIF aper_207 is not null and aper_210668 is not null and abs(getworkdays(aper_207,aper_210668)) > 1 then
+                    auto_prd_rec_ugp ('ВВ', 210, 200374, 'га', ovol, addworkdays(edate_210668,1), addworkdays(edate_210668,1), addworkdays(aper_210668,1));
+                else
+                    auto_prd_rec_ugp ('ВВ', 210, 200374, 'га', ovol, addworkdays(edate_210668,1), addworkdays(edate_210668,1));
+                END if;
+            ELSE
+                auto_prd_rec_ugp ('ВВ', 210, 200374, 'га', ovol);
+            END if;
+        end if;
