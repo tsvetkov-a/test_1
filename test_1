@@ -113,12 +113,19 @@ EXCEPTION
   WHEN OTHERS THEN RETURN 0;
 END;
 
+используется для вычисления площади пересечения между контуром заказа и определенными типами территорий, учитывая категорию сложности и тип территории.
+ppo_contours и ref_terr_balance
+
 
     FUNCTION get_int_borders(text_int varchar2, border_no pls_integer) return number is
     begin
       return to_number(regexp_substr(text_int, '\d+(\.\d+){0,1}', 1, border_no),'FM99999D9','NLS_NUMERIC_CHARACTERS = ''.,''');
     end get_int_borders;
     
+    принимает два параметра: text_int (строковое представление числовой последовательности) и border_no (номер границы), 
+    и возвращает число - значение указанной границы из числовой последовательности, извлеченной из строки text_int с использованием регулярного выражения.
+        
+        
         FUNCTION get_int_sum(p_s NUMBER, p_bp PLS_INTEGER, out_cod OUT PLS_INTEGER) RETURN NUMBER IS
       l_c NUMBER;
     BEGIN
@@ -135,6 +142,9 @@ END;
       END LOOP;
       RETURN 0;
     END get_int_sum;
+    осуществляет расчет суммы на основе входных данных, используя параметры и базовые цены из соответствующих таблиц, 
+    и возвращает результирующую сумму и код через выходной параметр.
+    ref_base_price и class_param_values
     
     
   FUNCTION insert_smeta(p_vld_id number, p_type vc_list, p_no number, p_bp_id number, sq_type number, p_volume number, p_measure varchar2, p_size_type pls_integer, p_ki number,
@@ -505,5 +515,12 @@ DBMS_OUTPUT.put_line('ppo_stages_id = '||p_vld_id||';smeta_type='||p.st||';smeta
     RETURN sh_id;
   END insert_smeta;
     
+    
+   ppo_smeta_header_new
+   cg_ref_codes
+   ref_coeff
+   ppo_voldates
+   ppo_ord_attrs
+   
     
     
