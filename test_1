@@ -53,7 +53,8 @@ FUNCTION check_ng_5apk3(o_id NUMBER) RETURN VARCHAR2 IS
 
     RETURN res;
   END;
-  
+  определяет и возвращает количество дней, необходимых для выполнения заданного объема работы или операции, 
+  исходя из данных в таблице class_norms, или выдает сообщение об ошибке, если такое определение невозможно или объем работы или операции не задан.
   
    FUNCTION get_terr(v_id NUMBER) RETURN VARCHAR2 IS
     res     VARCHAR2(1);
@@ -132,6 +133,10 @@ FUNCTION check_ng_5apk3(o_id NUMBER) RETURN VARCHAR2 IS
 
     RETURN NVL(res, 'О');
   END;
+  проверяет наличие сметы для определенного этапа или работы, и возвращает специальный режим, если он существует, в противном случае возвращает 'О'.
+  ppo_voldates, class_works, ppo_smeta_header_new, ppo_smeta_new
+  
+  
   
       FUNCTION get_volume(o_id NUMBER) RETURN NUMBER IS
       CURSOR c_vlm(o_id NUMBER, w_kind VARCHAR2) IS
@@ -173,4 +178,5 @@ FUNCTION check_ng_5apk3(o_id NUMBER) RETURN VARCHAR2 IS
       RETURN NULL;
     END;
     
+    ppo_voldates
     
