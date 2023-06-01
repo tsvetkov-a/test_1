@@ -1,182 +1,155 @@
-FUNCTION check_ng_5apk3(o_id NUMBER) RETURN VARCHAR2 IS
-    res VARCHAR2(1) := 'N';
-  BEGIN
-    SELECT 'Y' INTO res
-    FROM ppo_voldates w, class_works cw
-    WHERE w.ord_id = o_id
-      AND cw.complex = w.CATEGORY
-      AND cw.NAME = w.kind
-      AND cw.department = w.executor
-      AND cw.priority IS NOT NULL
-      AND cw.ng = '5апк3'
-      AND ROWNUM = 1 ;
+PROCEDURE calc_real_stg (OID PLS_INTEGER) IS
+    CURSOR cur1 IS SELECT id, kind, category, executor, s_date, e_date, accel_per, volume from ppo_voldates where ord_id = oid and
+		kind not in ('100','пво','141','422','426','427','428','429','809') ORDER BY kind,volume;
+    CURSOR cur2(wid PLS_INTEGER) IS SELECT id, no, s_date, e_date, accel_per, volume FROM ppo_voldates WHERE voldate_id = wid ORDER BY no;
+    CURSOR cur1_kl IS SELECT id, kind, category, executor, s_date, e_date, volume from ppo_voldates where ord_id = oid and
+		kind = 'кл' ORDER BY kind,volume;
+	i PLS_INTEGER := 0;
+	ii PLS_INTEGER := 0;
+	vol1 NUMBER;
+	vol2 NUMBER;
+	dd DATE;
+	sd101 DATE;
+	ed101 DATE;
+	sd112 DATE;
+	ed112 DATE;
+	sd132 DATE;
+	ed132 DATE;
+	sd134 DATE;
+	ed134 DATE;
+	aper132 DATE;
+	aper134 DATE;
+	aper808 DATE;
+	sd808 DATE;
+	ed808 DATE;
+	sd143 DATE;
+	ed143 DATE;
+	svol112 NUMBER;
+	svol101 NUMBER;
+	cnt NUMBER;
+	norm_112 NUMBER;
+	vol_397 NUMBER := 0;
+	vol_132 NUMBER := 0;
+	first_no VARCHAR2(1);
+BEGIN
 
-    RETURN res;
-  EXCEPTION
-    WHEN OTHERS THEN
-      RETURN res;
-  END;
-  
-  
-  FUNCTION get_days(v_volume NUMBER, w_ng VARCHAR2, s_ro_id NUMBER, w_name VARCHAR2) RETURN NUMBER IS
-    res       NUMBER;
-    v_str1    VARCHAR2(255);
-    v_str2    VARCHAR2(255);
-  BEGIN
-    IF w_ng IS NOT NULL THEN
-      v_str1 := 'работы "'||w_name||'"';
-      v_str2 := 'работу "'||w_name||'"';
-    ELSIF s_ro_id IS NOT NULL THEN
-      v_str1 := 'операции "'||w_name||'"';
-      v_str2 := 'операцию "'||w_name||'"';
-    END IF;
-
-    IF v_volume > 0 THEN
-      -- Определение нормы времени
-      BEGIN
-        SELECT days INTO res
-        FROM class_norms cn
-        WHERE (cn.ng = w_ng OR cn.ro_id = s_ro_id)
-          AND cn.period = v_period
-          AND cn.terr_type = v_terr_type
-          AND v_volume BETWEEN cn.minval AND cn.maxval
-          AND cn.e_date IS NULL;
-      EXCEPTION
-        WHEN OTHERS THEN
-          res_msg := 'Невозможно определить норму времени для '||v_str1||' !!!';
-          RAISE;
-      END;
+    calc_norm_stg(OID);
+   
+    SELECT duty_date INTO dd FROM ppo_orders WHERE id = OID;
+/* Определяем количество работ 101 и 112 в заказе. Это и соотношение их объемов определяет Ситуацию расчета */
+	for rec1 in (select volume from ppo_voldates where ord_id = oid and kind = '101') loop
+		i := i + 1;
+		if i = 1 then
+			vol1 := rec1.volume;
+		elsif i > 1 then
+			vol1 := 0;
+		end if;
+	end loop;
+	for rec2 in (select volume from ppo_voldates where ord_id = oid and kind = '112') loop
+		ii := ii + 1;
+		if ii = 1 then
+			vol2 := rec2.volume;
+		elsif ii > 1 then
+			vol2 := 0;
+		end if;
+	end loop;
+	for rec3 in (select volume from ppo_voldates where ord_id = oid and kind = '397') loop
+		vol_397 := vol_397 + rec3.volume;
+	end loop;
+/* Цикл по всем работам заказа, внутри - определяется ситуация и, в зависимости от работы, происходит коррекция */
+    ed132 := NULL;
+	FOR rec1 IN cur1 LOOP
+    	if i = 1 and ii = 1 and vol1 = vol2 THEN   --Ситуация 1
+            IF rec1.kind = '101' THEN
+                ed101 := NVL(rec1.accel_per, worktime.addworkdays(dd,get_class_norm(rec1.id, dd, rec1.volume, '2')));
+                UPDATE ppo_voldates set accel_per = ed101 where id = rec1.id;
+            ELSIF rec1.kind = '132' THEN
+                IF ed132 is null then
+                    ed132 := NVL(rec1.accel_per, worktime.addworkdays(ed101,get_class_norm(rec1.id, ed101, rec1.volume + vol_397, '2')));
+                ELSE 
+                    ed132 := NVL(rec1.accel_per, worktime.addworkdays(ed112,norm_112));
+                END IF;
+                UPDATE ppo_voldates set accel_per = ed132 where id = rec1.id;
+            END IF;
+        ELSIF i = 1 and ii = 1 and vol1 < vol2 THEN     --Ситуация 2
+            IF rec1.kind = '101' THEN
+                ed101 := NVL(rec1.accel_per, worktime.addworkdays(dd,get_class_norm(rec1.id, dd, rec1.volume, '2')));
+                UPDATE ppo_voldates set accel_per = ed101 where id = rec1.id;
+            ELSIF rec1.kind = '132' THEN
+                IF ed132 is null then
+                    ed132 := NVL(rec1.accel_per, worktime.addworkdays(ed101,get_class_norm(rec1.id, ed101, rec1.volume + vol_397, '2')));
+                ELSE
+                    ed132 := NVL(rec1.accel_per, worktime.addworkdays(ed112,get_class_norm(rec1.id, ed112, rec1.volume, '2')));
+                END IF;
+                UPDATE ppo_voldates set accel_per = ed132 where id = rec1.id;
+            END IF;
+        ELSIF i = 1 and ii = 1 and vol1 > vol2 THEN     --Ситуация 3
+            IF rec1.kind = '101' THEN
+                ed101 := NVL(rec1.accel_per, worktime.addworkdays(dd,get_class_norm(rec1.id, dd, rec1.volume, '2')));
+                UPDATE ppo_voldates set accel_per = ed101 where id = rec1.id;
+            ELSIF rec1.kind = '132' THEN
+                IF ed132 IS NULL THEN
+                    ed132 := NVL(rec1.accel_per, worktime.addworkdays(ed101,get_class_norm(rec1.id, ed101, rec1.volume + vol_397, '2')));
+                ELSE
+                    ed132 := NVL(rec1.accel_per, worktime.addworkdays(ed101,get_class_norm(rec1.id, ed101, rec1.volume, '2')));
+                END IF;
+                UPDATE ppo_voldates set accel_per = ed132 where id = rec1.id;
+            END IF;
+        ELSIF i = 1 and ii = 2 THEN     --Ситуация 4
+            IF rec1.kind = '101' THEN
+                ed101 := NVL(rec1.accel_per, worktime.addworkdays(dd,get_class_norm(rec1.id, dd, rec1.volume, '2')));
+                UPDATE ppo_voldates set accel_per = ed101 where id = rec1.id;
+            ELSIF rec1.kind = '132' THEN
+                SELECT SUM(volume) INTO svol112 FROM ppo_voldates WHERE ord_id = OID AND kind = '112';
+                SELECT SUM(volume) INTO svol101 FROM ppo_voldates WHERE ord_id = OID AND kind = '101';
+                IF ed132 IS NULL THEN
+                    vol_132 := rec1.volume + vol_397;
+                ELSE
+                    vol_132 := rec1.volume;
+                END IF;                
+                IF svol112 < svol101 THEN
+                    ed132 := NVL(rec1.accel_per, worktime.addworkdays(ed101,get_class_norm(rec1.id, ed101, vol_132, '2')));
+                ELSE
+                    IF ed132 is null THEN
+                        ed132 := NVL(rec1.accel_per, worktime.addworkdays(ed101,get_class_norm(rec1.id, ed101, vol_132, '2')));
+                    ELSE
+                        ed132 := NVL(rec1.accel_per, worktime.addworkdays(ed112,get_class_norm(rec1.id, ed112, vol_132, '2')));
+                    END IF;
+                END IF;
+                UPDATE ppo_voldates set accel_per = ed132 where id = rec1.id;
+            END IF;
+        ELSIF i = 0 and ii = 0 THEN     --Ситуации 5 и 7
+            SELECT count(id) into cnt from ppo_voldates where ord_id = OID and kind in ('143','527');	--OR 527
+            IF cnt > 0 then
+                IF rec1.kind = '132' THEN
+                    ed143 := worktime.addworkdays(dd,get_class_norm(rec1.id, dd, rec1.volume, '2', '2рс'));
+                    IF ed132 IS NULL THEN
+                        ed132 := NVL(rec1.accel_per, worktime.addworkdays(ed143,get_class_norm(rec1.id, ed143, rec1.volume + vol_397, '2', '2рс')));
+                    ELSE
+                        ed132 := NVL(rec1.accel_per, worktime.addworkdays(ed143,get_class_norm(rec1.id, ed143, rec1.volume, '2', '2рс')));
+                    END IF; 
+                    UPDATE ppo_voldates set accel_per = ed132 where id = rec1.id;
+                END IF;
+    		end if;
+        ELSIF i = 1 AND ii = 0 THEN     --Ситуация 6
+            IF rec1.kind = '101' THEN
+                ed101 := NVL(rec1.accel_per, worktime.addworkdays(dd,get_class_norm(rec1.id, dd, rec1.volume, '2')));
+                UPDATE ppo_voldates set accel_per = ed101 where id = rec1.id;
+            ELSIF rec1.kind = '132' THEN
+                IF ed132 IS NULL THEN
+                    ed132 := NVL(rec1.accel_per, worktime.addworkdays(ed101,get_class_norm(rec1.id, ed101, rec1.volume + vol_397, '2')));
+                ELSE
+                    ed132 := NVL(rec1.accel_per, worktime.addworkdays(ed101,get_class_norm(rec1.id, ed101, rec1.volume, '2')));
+                END IF;
+                UPDATE ppo_voldates set accel_per = ed132 where id = rec1.id;
+            END IF;
+        END if;
+    END LOOP;
+/* после 25.02.2019 */    
+    SELECT max(e_date),MAX(accel_per) INTO ed132,aper132 FROM ppo_voldates WHERE ord_id = OID AND kind = '132';
+    IF ed132 IS NULL THEN
+        SELECT max(e_date),MAX(accel_per) INTO ed132,aper132 FROM ppo_voldates WHERE ord_id = OID AND kind = '397';
     ELSE
-      res_msg := 'Введите объем в '||v_str2||' и перезапустите функцию !!!';
-      RAISE NO_DATA_FOUND;
-    END IF;
-
-    RETURN res;
-  END;
-  определяет и возвращает количество дней, необходимых для выполнения заданного объема работы или операции, 
-  исходя из данных в таблице class_norms, или выдает сообщение об ошибке, если такое определение невозможно или объем работы или операции не задан.
-  
-   FUNCTION get_terr(v_id NUMBER) RETURN VARCHAR2 IS
-    res     VARCHAR2(1);
-    w_id    ppo_voldates.id%TYPE;
-    w_name  class_works.meaning%TYPE;
-
-  BEGIN
-  -- Работа или этап ?
-    BEGIN
-      SELECT w.id, cw.meaning INTO w_id, w_name
-      FROM class_works cw, (
-        SELECT w.id, w.CATEGORY, w.kind, w.executor
-          FROM ppo_voldates w
-          WHERE w.id = v_id AND w.voldate_type = 'WORK'
-        UNION
-        SELECT w.id, w.CATEGORY, w.kind, w.executor
-          FROM ppo_voldates s, ppo_voldates w
-          WHERE s.id = v_id AND s.voldate_type = 'STG' AND w.id = s.voldate_id
-      ) w
-      WHERE cw.complex = w.CATEGORY
-        AND cw.NAME = w.kind
-        AND cw.department = w.executor;
-    EXCEPTION
-      WHEN OTHERS THEN
-      res_msg := 'Расчет сроков операций выполняется для работ или этапов !!!';
-      RAISE;
-    END;
-
-    IF w_id != v_id THEN
-      -- сначала проверяем наличие сметы по этапу
-      BEGIN
-        SELECT '1' INTO res
-        FROM ppo_smeta_header_new sh
-        WHERE sh.ppo_stages_id = v_id
-          AND sh.smeta_type = 'П'
-          AND ROWNUM = 1;
-      EXCEPTION
-        WHEN OTHERS THEN NULL;
-      END;
-    END IF;
-
-    IF res LIKE '1' THEN
-      -- будем проверять спецрежим в смете по этапу
-      w_id := v_id;
-    ELSE
-      -- проверяем наличие сметы по работе
-      BEGIN
-        SELECT '1' INTO res
-        FROM ppo_smeta_header_new sh
-        WHERE sh.ppo_stages_id = w_id
-          AND sh.smeta_type = 'П'
-          AND ROWNUM = 1;
-      EXCEPTION
-        WHEN NO_DATA_FOUND THEN
-          res_msg := 'Работа "'||w_name||'" не осмечена, расставьте сроки вручную !!!';
-          RAISE;
-        WHEN OTHERS THEN
-          res_msg := 'Ошибка при проверке сметы по работе "'||w_name||'" !!!';
-          RAISE;
-      END;
-    END IF;
-
-  -- Есть-ли спецрежим ?
-    BEGIN
-      SELECT 'С' INTO res
-      FROM ppo_smeta_header_new sh, ppo_smeta_new s
-      WHERE sh.ppo_stages_id = w_id
-        AND sh.smeta_type = 'П'
-        AND s.ppo_smeta_id = sh.id
-        AND s.coeff_id = 12
-        AND ROWNUM = 1;
-    EXCEPTION
-      WHEN NO_DATA_FOUND THEN
-        res := NULL;
-    END;
-
-    RETURN NVL(res, 'О');
-  END;
-  проверяет наличие сметы для определенного этапа или работы, и возвращает специальный режим, если он существует, в противном случае возвращает 'О'.
-  ppo_voldates, class_works, ppo_smeta_header_new, ppo_smeta_new
-  
-  
-  
-      FUNCTION get_volume(o_id NUMBER) RETURN NUMBER IS
-      CURSOR c_vlm(o_id NUMBER, w_kind VARCHAR2) IS
-        SELECT w.volume
-        FROM ppo_voldates w
-        WHERE w.ord_id = o_id
-          AND w.kind = w_kind;
-      vlm       NUMBER;
-    BEGIN
-      -- сначала из работы 101
-      OPEN c_vlm(o_id, '101');
-      FETCH c_vlm INTO vlm;
-      CLOSE c_vlm;
-      IF vlm IS NOT NULL THEN
-        RETURN vlm;
-      END IF;
-      -- потом 102
-      OPEN c_vlm(o_id, '102');
-      FETCH c_vlm INTO vlm;
-      CLOSE c_vlm;
-      IF vlm IS NOT NULL THEN
-        RETURN vlm;
-      END IF;
-      -- далее 112
-      OPEN c_vlm(o_id, '112');
-      FETCH c_vlm INTO vlm;
-      CLOSE c_vlm;
-      IF vlm IS NOT NULL THEN
-        RETURN vlm;
-      END IF;
-      -- и 100
-      OPEN c_vlm(o_id, '100');
-      FETCH c_vlm INTO vlm;
-      CLOSE c_vlm;
-      IF vlm IS NOT NULL THEN
-        RETURN vlm;
-      END IF;
-      -- не нашли :((((
-      RETURN NULL;
-    END;
-    
-    ppo_voldates
-    
+        UPDATE ppo_voldates set e_date = ed132, accel_per = aper132 where ord_id = OID AND kind = '397';
+    END if;
+    vol_132 := vol_397;
