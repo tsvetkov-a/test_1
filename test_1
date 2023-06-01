@@ -1,6 +1,9 @@
-PROCEDURE calc_real (OID PLS_INTEGER) IS
-    CURSOR cur1 IS SELECT id, kind, category, executor, s_date, accel_per, volume from ppo_voldates where ord_id = oid and
+PROCEDURE calc_norm_stg (OID PLS_INTEGER) IS
+    CURSOR cur1 IS SELECT id, kind, category, executor, s_date, e_date, accel_per, volume from ppo_voldates where ord_id = oid and
 		kind not in ('100','пво','141','422','426','427','428','429','809') ORDER BY kind,volume;
+    CURSOR cur2(wid PLS_INTEGER) IS SELECT id, no, s_date, e_date, accel_per, volume FROM ppo_voldates WHERE voldate_id = wid ORDER BY no;
+    CURSOR cur1_kl IS SELECT id, kind, category, executor, s_date, e_date, volume from ppo_voldates where ord_id = oid and
+		kind = 'кл' ORDER BY kind,volume;
 	i PLS_INTEGER := 0;
 	ii PLS_INTEGER := 0;
 	vol1 NUMBER;
@@ -14,24 +17,25 @@ PROCEDURE calc_real (OID PLS_INTEGER) IS
 	ed132 DATE;
 	sd134 DATE;
 	ed134 DATE;
+	aper132 DATE;
+	aper134 DATE;
+	aper808 DATE;
 	sd808 DATE;
 	ed808 DATE;
 	sd143 DATE;
 	ed143 DATE;
-	sd371 DATE;
-	ed371 DATE;
 	svol112 NUMBER;
 	svol101 NUMBER;
 	cnt NUMBER;
-	cnt808 NUMBER;
-	norm_112 NUMBER;
+	cnt_pd NUMBER;
+	sd_pd DATE;
+	ed_pd DATE;
 	vol_397 NUMBER := 0;
 	vol_132 NUMBER := 0;
+	first_no VARCHAR2(1);
 BEGIN
-
-    calc_norm(OID);
-   
     SELECT duty_date INTO dd FROM ppo_orders WHERE id = OID;
+DBMS_OUTPUT.put_line('duty_date='||to_char(dd));
 /* Определяем количество работ 101 и 112 в заказе. Это и соотношение их объемов определяет Ситуацию расчета */
 	for rec1 in (select volume from ppo_voldates where ord_id = oid and kind = '101') loop
 		i := i + 1;
@@ -49,176 +53,119 @@ BEGIN
 			vol2 := 0;
 		end if;
 	end loop;
+DBMS_OUTPUT.put_line('i='||i||';ii='||ii||';vol1='||vol1||';vol2='||vol2);
+    SELECT COUNT(id) INTO cnt_pd FROM ppo_voldates WHERE ord_id = OID AND kind IN ('153','152');
 	for rec3 in (select volume from ppo_voldates where ord_id = oid and kind = '397') loop
 		vol_397 := vol_397 + rec3.volume;
 	end loop;
 /* Цикл по всем работам заказа, внутри - определяется ситуация и, в зависимости от работы, происходит коррекция */
-    ed132 := NULL;
+    sd132 := NULL;
 	FOR rec1 IN cur1 LOOP
     	if i = 1 and ii = 1 and vol1 = vol2 THEN   --Ситуация 1
             IF rec1.kind = '101' THEN
-                ed101 := NVL(rec1.accel_per, worktime.addworkdays(dd,get_class_norm(rec1.id, dd, rec1.volume, '2')));
-                UPDATE ppo_voldates set accel_per = ed101 where id = rec1.id;
-            ELSIF rec1.kind = '112' then
-                norm_112 := get_class_norm(rec1.id, dd, rec1.volume, '2');  --для будущих расчетов (132-я считается по 112-й)
-                ed112 := NVL(rec1.accel_per, worktime.addworkdays(dd,norm_112));
-                UPDATE ppo_voldates set accel_per = ed112 where id = rec1.id;
+                sd101 := NVL(rec1.s_date, dd);
+                IF cnt_pd > 0 THEN
+                    FOR rec_pd IN (SELECT id,volume FROM ppo_voldates WHERE ord_id = OID AND kind IN ('153','152') ORDER BY kind desc) LOOP
+                        ed101 := NVL(rec1.e_date, worktime.addworkdays(sd101,get_class_norm(rec1.id, sd101, rec1.volume) + get_class_norm(rec_pd.id, sd101, rec_pd.volume)));
+                        sd_pd := sd101;
+                        ed_pd := ed101;
+                        UPDATE ppo_voldates set s_date = sd_pd, e_date = ed_pd where id = rec_pd.id;
+                        EXIT;
+                    END LOOP;
+                ELSE
+                    ed101 := NVL(rec1.e_date, worktime.addworkdays(sd101,get_class_norm(rec1.id, sd101, rec1.volume)));
+                END IF;
+                UPDATE ppo_voldates set s_date = sd101, e_date = ed101 where id = rec1.id;
             ELSIF rec1.kind = '132' THEN
-                IF ed132 is null then
-                    ed132 := NVL(rec1.accel_per, worktime.addworkdays(ed101,get_class_norm(rec1.id, ed101, rec1.volume + vol_397, '2')));
+                IF sd132 is null THEN
+                    sd132 := NVL(rec1.s_date, ed101);
+                    ed132 := NVL(rec1.e_date, worktime.addworkdays(sd132,get_class_norm(rec1.id, sd132, rec1.volume + vol_397)));
                 ELSE
-                    ed132 := NVL(rec1.accel_per, worktime.addworkdays(ed112,norm_112));
+                    sd132 := NVL(rec1.s_date, ed112);
+                    ed132 := NVL(rec1.e_date, worktime.addworkdays(sd132,get_class_norm(rec1.id, sd132, rec1.volume)));
                 END IF;
-                UPDATE ppo_voldates set accel_per = ed132 where id = rec1.id;
-            ELSIF rec1.kind IN ('134','397') THEN
-                SELECT MAX(accel_per) INTO ed134 FROM ppo_voldates WHERE ord_id = OID AND kind = '132';
-                UPDATE ppo_voldates set accel_per = ed134 where id = rec1.id;
-/*                
-            ELSIF rec1.kind IN ('808','838') THEN
-                SELECT MAX(accel_per) INTO ed808 FROM ppo_voldates WHERE ord_id = OID AND kind = '132';
-                IF ed808 IS NULL THEN
-                    SELECT MAX(accel_per) INTO ed808 FROM ppo_voldates WHERE ord_id = OID AND kind = '397';
-                END IF;
-                ed808 := NVL(rec1.accel_per, worktime.addworkdays(ed808,1 + get_class_norm(rec1.id, ed808, vol1, '2', 'торс')));
---                ed808 := NVL(rec1.accel_per, worktime.addworkdays(ed808,1 + get_class_norm(rec1.id, ed808, vol1, '2', '4рс')));
-                UPDATE ppo_voldates set accel_per = ed808 where id = rec1.id;
-*/                
-            ELSIF rec1.kind IN ('371') THEN
-                SELECT COUNT(id) INTO cnt808 FROM ppo_voldates WHERE ord_id = OID AND kind IN ('808','838');
-                SELECT MAX(accel_per) INTO ed134 FROM ppo_voldates WHERE ord_id = OID AND kind = '132';
-                IF ed134 IS NULL THEN
-                    SELECT MAX(accel_per) INTO ed134 FROM ppo_voldates WHERE ord_id = OID AND kind = '397';
-                END IF;
-                ed808 := NVL(rec1.accel_per, worktime.addworkdays(ed134,1 + get_class_norm(rec1.id, ed134, vol1, '2', 'торс')));
-/*                
-                IF cnt808 = 0 THEN
-                    ed808 := NVL(rec1.accel_per, worktime.addworkdays(ed134,1 + get_class_norm(rec1.id, ed134, vol1, '2', 'торс')));
-                ELSE
-                    ed808 := NVL(rec1.accel_per, worktime.addworkdays(ed134,1 + get_class_norm(rec1.id, ed134, vol1, '2', '4рс') + get_class_norm(rec1.id, ed134, vol1, '2', 'торс')));
-                END IF;
-*/                
-                UPDATE ppo_voldates set accel_per = ed808 where id = rec1.id;
+                UPDATE ppo_voldates set s_date = sd132, e_date = ed132 where id = rec1.id;
             END IF;
         ELSIF i = 1 and ii = 1 and vol1 < vol2 THEN     --Ситуация 2
             IF rec1.kind = '101' THEN
-                ed101 := NVL(rec1.accel_per, worktime.addworkdays(dd,get_class_norm(rec1.id, dd, rec1.volume, '2')));
-                UPDATE ppo_voldates set accel_per = ed101 where id = rec1.id;
-            ELSIF rec1.kind = '112' then
-                ed112 := NVL(rec1.accel_per, worktime.addworkdays(dd,get_class_norm(rec1.id, dd, rec1.volume, '2')));
-                UPDATE ppo_voldates set accel_per = ed112 where id = rec1.id;
+                sd101 := NVL(rec1.s_date, dd);
+                IF cnt_pd > 0 THEN
+                    FOR rec_pd IN (SELECT id,volume FROM ppo_voldates WHERE ord_id = OID AND kind IN ('153','152') ORDER BY kind desc) LOOP
+                        ed101 := NVL(rec1.e_date, worktime.addworkdays(sd101,get_class_norm(rec1.id, sd101, rec1.volume) + get_class_norm(rec_pd.id, sd101, rec_pd.volume)));
+                        sd_pd := sd101;
+                        ed_pd := ed101;
+                        UPDATE ppo_voldates set s_date = sd_pd, e_date = ed_pd where id = rec_pd.id;
+                        EXIT;
+                    END LOOP;
+                ELSE
+                    ed101 := NVL(rec1.e_date, worktime.addworkdays(sd101,get_class_norm(rec1.id, sd101, rec1.volume)));
+                END IF;
+                UPDATE ppo_voldates set s_date = sd101, e_date = ed101 where id = rec1.id;
             ELSIF rec1.kind = '132' THEN
-                IF ed132 is null then
-                    ed132 := NVL(rec1.accel_per, worktime.addworkdays(ed101,get_class_norm(rec1.id, ed101, rec1.volume + vol_397, '2')));
+                IF sd132 is null THEN
+                    sd132 := NVL(rec1.s_date, ed101);
+                    ed132 := NVL(rec1.e_date, worktime.addworkdays(sd132,get_class_norm(rec1.id, sd132, rec1.volume + vol_397)));
                 ELSE
-                    ed132 := NVL(rec1.accel_per, worktime.addworkdays(ed112,get_class_norm(rec1.id, ed112, rec1.volume, '2')));
+                    sd132 := NVL(rec1.s_date, ed112);
+                    ed132 := NVL(rec1.e_date, worktime.addworkdays(sd132,get_class_norm(rec1.id, sd132, rec1.volume)));
                 END IF;
-                UPDATE ppo_voldates set accel_per = ed132 where id = rec1.id;
-            ELSIF rec1.kind IN ('134','397') THEN
-                SELECT MAX(accel_per) INTO ed134 FROM ppo_voldates WHERE ord_id = OID AND kind = '132';
-                UPDATE ppo_voldates set accel_per = ed134 where id = rec1.id;
-/*                
-            ELSIF rec1.kind IN ('808','838') THEN
-                SELECT MAX(accel_per) INTO ed808 FROM ppo_voldates WHERE ord_id = OID AND kind = '132';
-                IF ed808 IS NULL THEN
-                    SELECT MAX(accel_per) INTO ed808 FROM ppo_voldates WHERE ord_id = OID AND kind = '397';
-                END IF;
-                ed808 := NVL(rec1.accel_per, worktime.addworkdays(ed808,1 + get_class_norm(rec1.id, ed808, vol1, '2', 'торс')));
---                ed808 := NVL(rec1.accel_per, worktime.addworkdays(ed808,1 + get_class_norm(rec1.id, ed808, vol1, '2', '4рс')));
-                UPDATE ppo_voldates set accel_per = ed808 where id = rec1.id;
-*/                
-            ELSIF rec1.kind IN ('371') THEN
-                SELECT COUNT(id) INTO cnt808 FROM ppo_voldates WHERE ord_id = OID AND kind IN ('808','838');
-                SELECT MAX(accel_per) INTO ed134 FROM ppo_voldates WHERE ord_id = OID AND kind = '132';
-                IF ed134 IS NULL THEN
-                    SELECT MAX(accel_per) INTO ed134 FROM ppo_voldates WHERE ord_id = OID AND kind = '397';
-                END IF;
-                ed808 := NVL(rec1.accel_per, worktime.addworkdays(ed134,1 + get_class_norm(rec1.id, ed134, vol1, '2', 'торс')));
-/*
-                IF cnt808 = 0 THEN
-                    ed808 := NVL(rec1.accel_per, worktime.addworkdays(ed134,1 + get_class_norm(rec1.id, ed134, vol1, '2', 'торс')));
-                ELSE
-                    ed808 := NVL(rec1.accel_per, worktime.addworkdays(ed134,1 + get_class_norm(rec1.id, ed134, vol1, '2', '4рс') + get_class_norm(rec1.id, ed134, vol1, '2', 'торс')));
-                END IF;
-*/                
-                UPDATE ppo_voldates set accel_per = ed808 where id = rec1.id;
+                UPDATE ppo_voldates set s_date = sd132, e_date = ed132 where id = rec1.id;
             END IF;
         ELSIF i = 1 and ii = 1 and vol1 > vol2 THEN     --Ситуация 3
             IF rec1.kind = '101' THEN
-                ed101 := NVL(rec1.accel_per, worktime.addworkdays(dd,get_class_norm(rec1.id, dd, rec1.volume, '2')));
-                UPDATE ppo_voldates set accel_per = ed101 where id = rec1.id;
-            ELSIF rec1.kind = '112' then
-                ed112 := NVL(rec1.accel_per, worktime.addworkdays(dd,get_class_norm(rec1.id, dd, rec1.volume, '2')));
-                UPDATE ppo_voldates set accel_per = ed112 where id = rec1.id;
+                sd101 := NVL(rec1.s_date, dd);
+                IF cnt_pd > 0 THEN
+                    FOR rec_pd IN (SELECT id,volume FROM ppo_voldates WHERE ord_id = OID AND kind IN ('153','152') ORDER BY kind desc) LOOP
+                        ed101 := NVL(rec1.e_date, worktime.addworkdays(sd101,get_class_norm(rec1.id, sd101, rec1.volume) + get_class_norm(rec_pd.id, sd101, rec_pd.volume)));
+                        sd_pd := sd101;
+                        ed_pd := ed101;
+                        UPDATE ppo_voldates set s_date = sd_pd, e_date = ed_pd where id = rec_pd.id;
+                        EXIT;
+                    END LOOP;
+                ELSE
+                    ed101 := NVL(rec1.e_date, worktime.addworkdays(sd101,get_class_norm(rec1.id, sd101, rec1.volume)));
+                END IF;
+                UPDATE ppo_voldates set s_date = sd101, e_date = ed101 where id = rec1.id;
             ELSIF rec1.kind = '132' THEN
-                IF ed132 is null then
-                    ed132 := NVL(rec1.accel_per, worktime.addworkdays(ed101,get_class_norm(rec1.id, ed101, rec1.volume + vol_397, '2')));
+                IF sd132 is null THEN
+                    sd132 := NVL(rec1.s_date, ed101);
+                    ed132 := NVL(rec1.e_date, worktime.addworkdays(sd132,get_class_norm(rec1.id, sd132, rec1.volume + vol_397)));
                 ELSE
-                    ed132 := NVL(rec1.accel_per, worktime.addworkdays(ed101,get_class_norm(rec1.id, ed101, rec1.volume, '2')));
+                    sd132 := NVL(rec1.s_date, ed112);
+                    ed132 := NVL(rec1.e_date, worktime.addworkdays(sd132,get_class_norm(rec1.id, sd132, rec1.volume)));
                 END IF;
-                UPDATE ppo_voldates set accel_per = ed132 where id = rec1.id;
-            ELSIF rec1.kind IN ('134','397') THEN
-                SELECT MAX(accel_per) INTO ed134 FROM ppo_voldates WHERE ord_id = OID AND kind = '132';
-                UPDATE ppo_voldates set accel_per = ed134 where id = rec1.id;
-/*                
-            ELSIF rec1.kind IN ('808','838') THEN
-                SELECT MAX(accel_per) INTO ed808 FROM ppo_voldates WHERE ord_id = OID AND kind = '132';
-                IF ed808 IS NULL THEN
-                    SELECT MAX(accel_per) INTO ed808 FROM ppo_voldates WHERE ord_id = OID AND kind = '397';
-                END IF;
-                ed808 := NVL(rec1.accel_per, worktime.addworkdays(ed808,1 + get_class_norm(rec1.id, ed808, vol1, '2', 'торс')));
---                ed808 := NVL(rec1.accel_per, worktime.addworkdays(ed808,1 + get_class_norm(rec1.id, ed808, vol1, '2', '4рс')));
-                UPDATE ppo_voldates set accel_per = ed808 where id = rec1.id;
-*/                
-            ELSIF rec1.kind IN ('371') THEN
-                SELECT COUNT(id) INTO cnt808 FROM ppo_voldates WHERE ord_id = OID AND kind IN ('808','838');
-                SELECT MAX(accel_per) INTO ed134 FROM ppo_voldates WHERE ord_id = OID AND kind = '132';
-                IF ed134 IS NULL THEN
-                    SELECT MAX(accel_per) INTO ed134 FROM ppo_voldates WHERE ord_id = OID AND kind = '397';
-                END IF;
-                ed808 := NVL(rec1.accel_per, worktime.addworkdays(ed134,1 + get_class_norm(rec1.id, ed134, vol1, '2', 'торс')));
-/*                
-                IF cnt808 = 0 THEN
-                    ed808 := NVL(rec1.accel_per, worktime.addworkdays(ed134,1 + get_class_norm(rec1.id, ed134, vol1, '2', 'торс')));
-                ELSE
-                    ed808 := NVL(rec1.accel_per, worktime.addworkdays(ed134,1 + get_class_norm(rec1.id, ed134, vol1, '2', '4рс') + get_class_norm(rec1.id, ed134, vol1, '2', 'торс')));
-                END IF;
-*/                
-                UPDATE ppo_voldates set accel_per = ed808 where id = rec1.id;
+                UPDATE ppo_voldates set s_date = sd132, e_date = ed132 where id = rec1.id;
             END IF;
         ELSIF i = 1 and ii = 2 THEN     --Ситуация 4
             IF rec1.kind = '101' THEN
-                ed101 := NVL(rec1.accel_per, worktime.addworkdays(dd,get_class_norm(rec1.id, dd, rec1.volume, '2')));
-                UPDATE ppo_voldates set accel_per = ed101 where id = rec1.id;
-            ELSIF rec1.kind = '112' then
-                ed112 := NVL(rec1.accel_per, worktime.addworkdays(dd,get_class_norm(rec1.id, dd, rec1.volume, '2')));
-                UPDATE ppo_voldates set accel_per = ed112 where id = rec1.id;
+                sd101 := NVL(rec1.s_date, dd);
+                IF cnt_pd > 0 THEN
+                    FOR rec_pd IN (SELECT id,volume FROM ppo_voldates WHERE ord_id = OID AND kind IN ('153','152') ORDER BY kind desc) LOOP
+                        ed101 := NVL(rec1.e_date, worktime.addworkdays(sd101,get_class_norm(rec1.id, sd101, rec1.volume) + get_class_norm(rec_pd.id, sd101, rec_pd.volume)));
+                        sd_pd := sd101;
+                        ed_pd := ed101;
+                        UPDATE ppo_voldates set s_date = sd_pd, e_date = ed_pd where id = rec_pd.id;
+                        EXIT;
+                    END LOOP;
+                ELSE
+                    ed101 := NVL(rec1.e_date, worktime.addworkdays(sd101,get_class_norm(rec1.id, sd101, rec1.volume)));
+                END IF;
+                UPDATE ppo_voldates set s_date = sd101, e_date = ed101 where id = rec1.id;
             ELSIF rec1.kind = '132' THEN
                 SELECT SUM(volume) INTO svol112 FROM ppo_voldates WHERE ord_id = OID AND kind = '112';
                 SELECT SUM(volume) INTO svol101 FROM ppo_voldates WHERE ord_id = OID AND kind = '101';
-                IF ed132 IS NULL THEN
+                IF sd132 IS NULL THEN
                     vol_132 := rec1.volume + vol_397;
                 ELSE
                     vol_132 := rec1.volume;
                 END IF;                
                 IF svol112 < svol101 THEN
-                    ed132 := NVL(rec1.accel_per, worktime.addworkdays(ed101,get_class_norm(rec1.id, ed101, vol_132, '2')));
+                    sd132 := NVL(rec1.s_date, ed101);
                 ELSE
-                    IF ed132 is null THEN
-                        ed132 := NVL(rec1.accel_per, worktime.addworkdays(ed101,get_class_norm(rec1.id, ed101, vol_132, '2')));
+                    IF sd132 is null THEN
+                        sd132 := NVL(rec1.s_date, ed101);
                     ELSE
-                        ed132 := NVL(rec1.accel_per, worktime.addworkdays(ed112,get_class_norm(rec1.id, ed112, vol_132, '2')));
+                        sd132 := NVL(rec1.s_date, ed112);
                     END IF;
+                    ed132 := NVL(rec1.e_date, worktime.addworkdays(sd132,get_class_norm(rec1.id, sd132, vol_132)));
                 END IF;
-                UPDATE ppo_voldates set accel_per = ed132 where id = rec1.id;
-            ELSIF rec1.kind IN ('134','397') THEN
-                SELECT MAX(accel_per) INTO ed134 FROM ppo_voldates WHERE ord_id = OID AND kind = '132';
-                UPDATE ppo_voldates set accel_per = ed134 where id = rec1.id;
-/*                
-            ELSIF rec1.kind IN ('808','838') THEN
-                SELECT MAX(accel_per) INTO ed808 FROM ppo_voldates WHERE ord_id = OID AND kind = '132';
-                IF ed808 IS NULL THEN
-                    SELECT MAX(accel_per) INTO ed808 FROM ppo_voldates WHERE ord_id = OID AND kind = '397';
-                END IF;
-                ed808 := NVL(rec1.accel_per, worktime.addworkdays(ed808,1 + get_class_norm(rec1.id, ed808, vol1, '2', 'торс')));
---                ed808 := NVL(rec1.accel_per, worktime.addworkdays(ed808,1 + get_class_norm(rec1.id, ed808, vol1, '2', '4рс')));
-                UPDATE ppo_voldates set accel_per = ed808 where id = rec1.id;
