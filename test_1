@@ -1,153 +1,176 @@
-PROCEDURE auto_prd_rec (stg varchar2, ro pls_integer, re pls_integer default null, msr varchar2 default null, vol number default null,
-                                                sd date default null, ed date default null, ad date default null,
-                                                sd_add pls_integer default null, ed_add pls_integer default null,
-                                                rc pls_integer default null, cadd pls_integer default NULL, brigade pls_integer DEFAULT null) IS
-c_1 PLS_INTEGER;
-c_2 PLS_INTEGER;
-BEGIN
-    IF cadd IS NOT NULL THEN SELECT id INTO c_1 FROM ref_com_add WHERE id = cadd; END IF;
-    IF rc IS NOT NULL THEN SELECT id INTO c_2 FROM ref_com WHERE id = rc; END IF;
-    execute immediate 'INSERT INTO ppo_productions (voldate_id, stage, ro_id, re_id, measure, volume, t_date, e_date, a_date, cadd_id, rc_id, brigade) values (:a,:b,:c,:d,:e,:f,:g,:h,:i,:j,:k,:l)' USING
-        vd, stg, ro, re, msr, vol,
-        CASE WHEN sd IS NOT NULL THEN addworkdays(sd,nvl(sd_add,0)) ELSE NULL END,
-        CASE WHEN ed IS NOT NULL THEN ed WHEN sd IS NOT NULL AND ed_add IS NOT NULL THEN addworkdays(sd,ed_add) ELSE NULL END,
-        CASE WHEN ad IS NOT NULL THEN ad ELSE NULL END,
-        CASE WHEN cadd IS NOT NULL THEN c_1 ELSE NULL END,
-        CASE WHEN rc IS NOT NULL THEN c_2 ELSE NULL END,
-        CASE WHEN brigade IS NOT NULL THEN ADMIN.N_LIST(brigade) ELSE NULL END;
+FUNCTION check_ng_5apk3(o_id NUMBER) RETURN VARCHAR2 IS
+    res VARCHAR2(1) := 'N';
+  BEGIN
+    SELECT 'Y' INTO res
+    FROM ppo_voldates w, class_works cw
+    WHERE w.ord_id = o_id
+      AND cw.complex = w.CATEGORY
+      AND cw.NAME = w.kind
+      AND cw.department = w.executor
+      AND cw.priority IS NOT NULL
+      AND cw.ng = '5апк3'
+      AND ROWNUM = 1 ;
 
-END;
+    RETURN res;
+  EXCEPTION
+    WHEN OTHERS THEN
+      RETURN res;
+  END;
+  
+  
+  FUNCTION get_days(v_volume NUMBER, w_ng VARCHAR2, s_ro_id NUMBER, w_name VARCHAR2) RETURN NUMBER IS
+    res       NUMBER;
+    v_str1    VARCHAR2(255);
+    v_str2    VARCHAR2(255);
+  BEGIN
+    IF w_ng IS NOT NULL THEN
+      v_str1 := 'работы "'||w_name||'"';
+      v_str2 := 'работу "'||w_name||'"';
+    ELSIF s_ro_id IS NOT NULL THEN
+      v_str1 := 'операции "'||w_name||'"';
+      v_str2 := 'операцию "'||w_name||'"';
+    END IF;
 
-PROCEDURE auto_prd_rec_ugp (stg varchar2, nid pls_integer, re pls_integer default null, msr varchar2 default null, vol number default null,
-                                                sd date default null, ed date default null, ad date default null,
-                                                sd_add pls_integer default null, ed_add pls_integer default null,
-                                                rc pls_integer default null, cadd pls_integer default NULL, brigade pls_integer DEFAULT null) IS
-c_1 PLS_INTEGER;
-c_2 PLS_INTEGER;
-rd PLS_INTEGER;
-ro PLS_INTEGER;
-reid pls_integer;
-BEGIN
-    IF cadd IS NOT NULL THEN SELECT id INTO c_1 FROM ref_com_add WHERE id = cadd; END IF;
-    IF rc IS NOT NULL THEN SELECT id INTO c_2 FROM ref_com WHERE id = rc; END IF;
-    SELECT executor INTO rd FROM ppo_voldates WHERE (id = vd OR id = (SELECT voldate_id FROM ppo_voldates WHERE id = vd)) AND executor IS NOT NULL;
-    SELECT id, nvl(re_id,re) INTO ro, reid FROM ref_operations WHERE stage = stg AND rd_id = rd AND name_id = nid;
-    execute immediate 'INSERT INTO ppo_productions (voldate_id, stage, ro_id, re_id, measure, volume, t_date, e_date, a_date, cadd_id, rc_id, brigade) values (:a,:b,:c,:d,:e,:f,:g,:h,:i,:j,:k,:l)' USING
-        vd, stg, ro, reid, msr, vol,
-        CASE WHEN sd IS NOT NULL THEN addworkdays(sd,nvl(sd_add,0)) ELSE NULL END,
-        CASE WHEN ed IS NOT NULL THEN ed WHEN sd IS NOT NULL AND ed_add IS NOT NULL THEN addworkdays(sd,ed_add) ELSE NULL END,
-        CASE WHEN ad IS NOT NULL THEN ad ELSE NULL END,
-        CASE WHEN cadd IS NOT NULL THEN c_1 ELSE NULL END,
-        CASE WHEN rc IS NOT NULL THEN c_2 ELSE NULL END,
-        CASE WHEN brigade IS NOT NULL THEN ADMIN.N_LIST(brigade) ELSE NULL END;
+    IF v_volume > 0 THEN
+      -- Определение нормы времени
+      BEGIN
+        SELECT days INTO res
+        FROM class_norms cn
+        WHERE (cn.ng = w_ng OR cn.ro_id = s_ro_id)
+          AND cn.period = v_period
+          AND cn.terr_type = v_terr_type
+          AND v_volume BETWEEN cn.minval AND cn.maxval
+          AND cn.e_date IS NULL;
+      EXCEPTION
+        WHEN OTHERS THEN
+          res_msg := 'Невозможно определить норму времени для '||v_str1||' !!!';
+          RAISE;
+      END;
+    ELSE
+      res_msg := 'Введите объем в '||v_str2||' и перезапустите функцию !!!';
+      RAISE NO_DATA_FOUND;
+    END IF;
 
-END;
+    RETURN res;
+  END;
+  
+  
+   FUNCTION get_terr(v_id NUMBER) RETURN VARCHAR2 IS
+    res     VARCHAR2(1);
+    w_id    ppo_voldates.id%TYPE;
+    w_name  class_works.meaning%TYPE;
 
-PROCEDURE eco_after_duty (vd_in pls_integer) IS
-is_sec VARCHAR2(1);
-BEGIN
-    vd := vd_in;
-    for rec1 in (select confident from ppo_orders where id =
-        (select ord_id FROM ppo_voldates WHERE id = vd
-         UNION ALL
-         SELECT ord_id FROM ppo_voldates WHERE id =
-         (SELECT voldate_id FROM ppo_voldates WHERE id = vd))) LOOP
-         is_sec := nvl(rec1.confident,'N');
-    END LOOP;
-    auto_prd_rec('ПЭ', 283653, 201637);
-    auto_prd_rec('ПЭ', 283654, 201637);
-    auto_prd_rec('ПЭ', 283655, 201637);
-    auto_prd_rec('ЛЭ', 283656, 227622);
-    auto_prd_rec('ЛЭ', 283657, 201759);
-    auto_prd_rec('КЭ', 283658, 227622);
-    auto_prd_rec('КЭ', 283659, 201759);
-    auto_prd_rec('ОЭ', 283660, 227622);
-    auto_prd_rec('ОЭ', 283661, 201743);
-    if is_sec = 'Y' then
-        auto_prd_rec('ОЭ', 283662, 201676);
-    else
-        auto_prd_rec('ОЭ', 283662, 207173);
-    end if;
-END;
+  BEGIN
+  -- Работа или этап ?
+    BEGIN
+      SELECT w.id, cw.meaning INTO w_id, w_name
+      FROM class_works cw, (
+        SELECT w.id, w.CATEGORY, w.kind, w.executor
+          FROM ppo_voldates w
+          WHERE w.id = v_id AND w.voldate_type = 'WORK'
+        UNION
+        SELECT w.id, w.CATEGORY, w.kind, w.executor
+          FROM ppo_voldates s, ppo_voldates w
+          WHERE s.id = v_id AND s.voldate_type = 'STG' AND w.id = s.voldate_id
+      ) w
+      WHERE cw.complex = w.CATEGORY
+        AND cw.NAME = w.kind
+        AND cw.department = w.executor;
+    EXCEPTION
+      WHEN OTHERS THEN
+      res_msg := 'Расчет сроков операций выполняется для работ или этапов !!!';
+      RAISE;
+    END;
 
-PROCEDURE eco_before_duty (vd_in pls_integer) IS
-BEGIN
-    vd := vd_in;
-    auto_prd_rec('ПРЭ', 283651, 227622);
-    auto_prd_rec('ПРЭ', 283652, 201729);
-END;
+    IF w_id != v_id THEN
+      -- сначала проверяем наличие сметы по этапу
+      BEGIN
+        SELECT '1' INTO res
+        FROM ppo_smeta_header_new sh
+        WHERE sh.ppo_stages_id = v_id
+          AND sh.smeta_type = 'П'
+          AND ROWNUM = 1;
+      EXCEPTION
+        WHEN OTHERS THEN NULL;
+      END;
+    END IF;
 
-PROCEDURE eco_after_duty (vd_in pls_integer) IS
-is_sec VARCHAR2(1);
-BEGIN
-    vd := vd_in;
-    for rec1 in (select confident from ppo_orders where id =
-        (select ord_id FROM ppo_voldates WHERE id = vd
-         UNION ALL
-         SELECT ord_id FROM ppo_voldates WHERE id =
-         (SELECT voldate_id FROM ppo_voldates WHERE id = vd))) LOOP
-         is_sec := nvl(rec1.confident,'N');
-    END LOOP;
-    auto_prd_rec('ПЭ', 283653, 201637);
-    auto_prd_rec('ПЭ', 283654, 201637);
-    auto_prd_rec('ПЭ', 283655, 201637);
-    auto_prd_rec('ЛЭ', 283656, 227622);
-    auto_prd_rec('ЛЭ', 283657, 201759);
-    auto_prd_rec('КЭ', 283658, 227622);
-    auto_prd_rec('КЭ', 283659, 201759);
-    auto_prd_rec('ОЭ', 283660, 227622);
-    auto_prd_rec('ОЭ', 283661, 201743);
-    if is_sec = 'Y' then
-        auto_prd_rec('ОЭ', 283662, 201676);
-    else
-        auto_prd_rec('ОЭ', 283662, 207173);
-    end if;
-END;
+    IF res LIKE '1' THEN
+      -- будем проверять спецрежим в смете по этапу
+      w_id := v_id;
+    ELSE
+      -- проверяем наличие сметы по работе
+      BEGIN
+        SELECT '1' INTO res
+        FROM ppo_smeta_header_new sh
+        WHERE sh.ppo_stages_id = w_id
+          AND sh.smeta_type = 'П'
+          AND ROWNUM = 1;
+      EXCEPTION
+        WHEN NO_DATA_FOUND THEN
+          res_msg := 'Работа "'||w_name||'" не осмечена, расставьте сроки вручную !!!';
+          RAISE;
+        WHEN OTHERS THEN
+          res_msg := 'Ошибка при проверке сметы по работе "'||w_name||'" !!!';
+          RAISE;
+      END;
+    END IF;
 
-PROCEDURE std_geo_after_duty (vd_in pls_integer) IS
-is_sec VARCHAR2(1);
-BEGIN
-    vd := vd_in;
-    for rec1 in (select confident from ppo_orders where id =
-        (select ord_id FROM ppo_voldates WHERE id = vd
-         UNION ALL
-         SELECT ord_id FROM ppo_voldates WHERE id =
-         (SELECT voldate_id FROM ppo_voldates WHERE id = vd))) LOOP
-         is_sec := nvl(rec1.confident,'N');
-    END LOOP;
-    auto_prd_rec('ПМ', 272431, 203847);
-    auto_prd_rec('ПМ', 272432, 203847);
-    auto_prd_rec('ПМ', 272569, 203847);
-    auto_prd_rec('ПМ', 272433, 203847);
-    auto_prd_rec('П', 272434, 201714);
-    auto_prd_rec('П', 272859, 201714);
-    auto_prd_rec('П', 272860, 201714);
-    auto_prd_rec('П', 272570, 203503);
-    auto_prd_rec('ГР', 272555, 201704);
-    auto_prd_rec('ГР', 272503, 201704);
-    auto_prd_rec('Л', 543998, 225525);
-    auto_prd_rec('Л', 543997, 225525);
-    auto_prd_rec('Л', 543996, 225525);
-    auto_prd_rec('Л', 272439, 225525);
-    auto_prd_rec('К', 272442, 201704);
-    auto_prd_rec('К', 272440, 206542);
-    auto_prd_rec('К', 543991, 201751);
-    auto_prd_rec('К', 273116, 201706);
-    auto_prd_rec('ОТК', 272443, 1132824);
-    auto_prd_rec('ОТК', 272441, 201729);
-    if is_sec = 'Y' then
-        auto_prd_rec('ОТК', 272444, 201676);
-    else
-        auto_prd_rec('ОТК', 272444, 207173);
-    end if;
-END;
+  -- Есть-ли спецрежим ?
+    BEGIN
+      SELECT 'С' INTO res
+      FROM ppo_smeta_header_new sh, ppo_smeta_new s
+      WHERE sh.ppo_stages_id = w_id
+        AND sh.smeta_type = 'П'
+        AND s.ppo_smeta_id = sh.id
+        AND s.coeff_id = 12
+        AND ROWNUM = 1;
+    EXCEPTION
+      WHEN NO_DATA_FOUND THEN
+        res := NULL;
+    END;
 
-PROCEDURE std_geo_before_duty (vd_in pls_integer) IS
-BEGIN
-    vd := vd_in;
-    auto_prd_rec('ПР', 272560, 201676);
-    auto_prd_rec('ПР', 272561, 201704);
-    auto_prd_rec('ПР', 272562, 206542);
-    auto_prd_rec('ПР', 272507, 201729);
-END;
-
+    RETURN NVL(res, 'О');
+  END;
+  
+      FUNCTION get_volume(o_id NUMBER) RETURN NUMBER IS
+      CURSOR c_vlm(o_id NUMBER, w_kind VARCHAR2) IS
+        SELECT w.volume
+        FROM ppo_voldates w
+        WHERE w.ord_id = o_id
+          AND w.kind = w_kind;
+      vlm       NUMBER;
+    BEGIN
+      -- сначала из работы 101
+      OPEN c_vlm(o_id, '101');
+      FETCH c_vlm INTO vlm;
+      CLOSE c_vlm;
+      IF vlm IS NOT NULL THEN
+        RETURN vlm;
+      END IF;
+      -- потом 102
+      OPEN c_vlm(o_id, '102');
+      FETCH c_vlm INTO vlm;
+      CLOSE c_vlm;
+      IF vlm IS NOT NULL THEN
+        RETURN vlm;
+      END IF;
+      -- далее 112
+      OPEN c_vlm(o_id, '112');
+      FETCH c_vlm INTO vlm;
+      CLOSE c_vlm;
+      IF vlm IS NOT NULL THEN
+        RETURN vlm;
+      END IF;
+      -- и 100
+      OPEN c_vlm(o_id, '100');
+      FETCH c_vlm INTO vlm;
+      CLOSE c_vlm;
+      IF vlm IS NOT NULL THEN
+        RETURN vlm;
+      END IF;
+      -- не нашли :((((
+      RETURN NULL;
+    END;
+    
+    
