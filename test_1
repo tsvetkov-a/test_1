@@ -1,4 +1,6 @@
 
+
+Package handles functionality related to date and time
   -- return year based on date
   function get_year (p_date in date) return number;
 
