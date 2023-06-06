@@ -1,3 +1,30 @@
-Modifies the user's query to include the selected filters.
-  Usable in classic reports, tabular forms, and other places which allow
-  for a function returning SQL query.
+PROCEDURE ATT_REG (ord_cat VARCHAR2) IS --5 (PDD_ATT_REG,PDD_ATT_REG_CONF,GZ_ATT_REG,GZ_ATT_REG_CONF)
+BEGIN
+    FOR rec1 IN (SELECT s.id, s.no, s.s_date, s.e_date, rng.days FROM ppo_voldates s JOIN ppo_voldates w ON s.voldate_id = w.id JOIN class_works cw ON w.CATEGORY = cw.complex AND w.kind = cw.NAME AND w.executor = cw.department JOIN
+        ref_norm_groups rng ON rng.work_category = cw.CATEGORY WHERE w.ord_id = OID AND rng.order_type = ord_cat AND rng.work_category = 'Т' AND p_ovol BETWEEN rng.minval AND rng.maxval AND cw.e_date IS NULL AND s.NO = '1') LOOP
+        t_days := rec1.days;
+        t_s_date := p_start;
+        t_e_date := worktime.addworkdays(t_s_date,t_days);
+        UPDATE ppo_voldates SET s_date = t_s_date, e_date = t_e_date WHERE id = rec1.id;
+    END LOOP;
+    FOR rec1 IN (SELECT s.id, s.no, s.s_date, s.e_date, rng.days FROM ppo_voldates s JOIN ppo_voldates w ON s.voldate_id = w.id JOIN class_works cw ON w.CATEGORY = cw.complex AND w.kind = cw.NAME AND w.executor = cw.department JOIN
+        ref_norm_groups rng ON rng.work_category = cw.CATEGORY WHERE w.ord_id = OID AND rng.order_type = ord_cat AND rng.work_category = 'П' AND p_ovol BETWEEN rng.minval AND rng.maxval AND cw.e_date IS NULL AND s.NO = '1') LOOP
+        p_days := rec1.days;
+        p_s_date := t_e_date;
+        p_e_date := worktime.addworkdays(p_s_date,p_days);
+        UPDATE ppo_voldates SET s_date = p_s_date, e_date = p_e_date WHERE id = rec1.id;
+    END LOOP;
+    FOR rec1 IN (SELECT s.id, s.no, s.s_date, s.e_date FROM ppo_voldates s JOIN ppo_voldates w ON s.voldate_id = w.id JOIN class_works cw ON w.CATEGORY = cw.complex AND w.kind = cw.NAME AND w.executor = cw.department WHERE
+        w.ord_id = OID AND cw.category = 'ЛГР' AND cw.e_date IS NULL AND s.NO = '1') LOOP
+        lgr_s_date := p_start;
+        lgr_e_date := worktime.addworkdays(lgr_s_date,t_days + p_days);
+        UPDATE ppo_voldates SET s_date = lgr_s_date, e_date = lgr_e_date WHERE id = rec1.id;
+    END LOOP;
+    SELECT MIN(s.s_date),MAX(s.e_date) INTO min_date,max_date FROM ppo_voldates s JOIN ppo_voldates w ON s.voldate_id = w.id WHERE s.NO = '1' AND w.ord_id = OID;
+    UPDATE ppo_voldates s SET s_date = max_date, e_date = worktime.addworkdays(max_date,40/*CASE WHEN ord_cat = 'GZ_ATT_REG_CONF' THEN 40 ELSE 39 END*/) WHERE s.NO = '2' AND s.voldate_id IN
+        (SELECT id FROM ppo_voldates WHERE ord_id = OID AND kind NOT IN ('785','985'));
+    FOR rec1 IN (SELECT w.id FROM ppo_voldates w WHERE w.ord_id = OID AND w.kind NOT IN ('785','985') AND EXISTS (SELECT 1 FROM ppo_voldates WHERE voldate_id = w.id AND NO IN ('1','2'))) LOOP
+        SELECT MIN(s_date),MAX(e_date) INTO min_date,max_date FROM ppo_voldates WHERE voldate_id = rec1.id AND NO IN ('1','2');
+        UPDATE ppo_voldates SET s_date = min_date, e_date = max_date WHERE id = rec1.id;
+    END LOOP;
+END;
