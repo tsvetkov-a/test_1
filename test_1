@@ -1,30 +1,48 @@
-PROCEDURE ATT_REG (ord_cat VARCHAR2) IS --5 (PDD_ATT_REG,PDD_ATT_REG_CONF,GZ_ATT_REG,GZ_ATT_REG_CONF)
-BEGIN
-    FOR rec1 IN (SELECT s.id, s.no, s.s_date, s.e_date, rng.days FROM ppo_voldates s JOIN ppo_voldates w ON s.voldate_id = w.id JOIN class_works cw ON w.CATEGORY = cw.complex AND w.kind = cw.NAME AND w.executor = cw.department JOIN
-        ref_norm_groups rng ON rng.work_category = cw.CATEGORY WHERE w.ord_id = OID AND rng.order_type = ord_cat AND rng.work_category = 'Т' AND p_ovol BETWEEN rng.minval AND rng.maxval AND cw.e_date IS NULL AND s.NO = '1') LOOP
-        t_days := rec1.days;
-        t_s_date := p_start;
-        t_e_date := worktime.addworkdays(t_s_date,t_days);
-        UPDATE ppo_voldates SET s_date = t_s_date, e_date = t_e_date WHERE id = rec1.id;
-    END LOOP;
-    FOR rec1 IN (SELECT s.id, s.no, s.s_date, s.e_date, rng.days FROM ppo_voldates s JOIN ppo_voldates w ON s.voldate_id = w.id JOIN class_works cw ON w.CATEGORY = cw.complex AND w.kind = cw.NAME AND w.executor = cw.department JOIN
-        ref_norm_groups rng ON rng.work_category = cw.CATEGORY WHERE w.ord_id = OID AND rng.order_type = ord_cat AND rng.work_category = 'П' AND p_ovol BETWEEN rng.minval AND rng.maxval AND cw.e_date IS NULL AND s.NO = '1') LOOP
-        p_days := rec1.days;
-        p_s_date := t_e_date;
-        p_e_date := worktime.addworkdays(p_s_date,p_days);
-        UPDATE ppo_voldates SET s_date = p_s_date, e_date = p_e_date WHERE id = rec1.id;
-    END LOOP;
-    FOR rec1 IN (SELECT s.id, s.no, s.s_date, s.e_date FROM ppo_voldates s JOIN ppo_voldates w ON s.voldate_id = w.id JOIN class_works cw ON w.CATEGORY = cw.complex AND w.kind = cw.NAME AND w.executor = cw.department WHERE
-        w.ord_id = OID AND cw.category = 'ЛГР' AND cw.e_date IS NULL AND s.NO = '1') LOOP
-        lgr_s_date := p_start;
-        lgr_e_date := worktime.addworkdays(lgr_s_date,t_days + p_days);
-        UPDATE ppo_voldates SET s_date = lgr_s_date, e_date = lgr_e_date WHERE id = rec1.id;
-    END LOOP;
-    SELECT MIN(s.s_date),MAX(s.e_date) INTO min_date,max_date FROM ppo_voldates s JOIN ppo_voldates w ON s.voldate_id = w.id WHERE s.NO = '1' AND w.ord_id = OID;
-    UPDATE ppo_voldates s SET s_date = max_date, e_date = worktime.addworkdays(max_date,40/*CASE WHEN ord_cat = 'GZ_ATT_REG_CONF' THEN 40 ELSE 39 END*/) WHERE s.NO = '2' AND s.voldate_id IN
-        (SELECT id FROM ppo_voldates WHERE ord_id = OID AND kind NOT IN ('785','985'));
-    FOR rec1 IN (SELECT w.id FROM ppo_voldates w WHERE w.ord_id = OID AND w.kind NOT IN ('785','985') AND EXISTS (SELECT 1 FROM ppo_voldates WHERE voldate_id = w.id AND NO IN ('1','2'))) LOOP
-        SELECT MIN(s_date),MAX(e_date) INTO min_date,max_date FROM ppo_voldates WHERE voldate_id = rec1.id AND NO IN ('1','2');
-        UPDATE ppo_voldates SET s_date = min_date, e_date = max_date WHERE id = rec1.id;
-    END LOOP;
+create or replace PACKAGE BODY ACC IS
+
+/******************************************************************************/
+
+  PROCEDURE clear_atr IS
+  BEGIN
+    db_done_account_date := NULL;
+    db_done_acc_no := NULL;
+    db_done_acc_date := NULL;
+    db_err_account_date := NULL;
+    db_err_acc_no := NULL;
+    db_err_acc_date := NULL;
+  END;
+
+/******************************************************************************/
+
+  PROCEDURE get_done_atr(d_no VARCHAR2, skip_id NUMBER) IS
+    CURSOR c_done_atr(d_no VARCHAR2, skip_id NUMBER) IS
+      SELECT s.account_date, s.acc_no, s.acc_date
+      FROM ppo_voldates w, ppo_voldates s
+      WHERE w.id = s.voldate_id
+        AND w.ord_id = (SELECT w1.ord_id FROM ppo_voldates w1, ppo_voldates s1 WHERE w1.id = s1.voldate_id AND s1.id = skip_id )
+        AND s.done_no = d_no
+        AND s.id != skip_id
+      GROUP BY s.account_date, s.acc_no, s.acc_date
+      ORDER BY s.acc_no, s.acc_date, s.account_date;
+  BEGIN
+    clear_atr;
+    OPEN c_done_atr(d_no, skip_id);
+    FETCH c_done_atr INTO db_done_account_date, db_done_acc_no, db_done_acc_date;
+    FETCH c_done_atr INTO db_err_account_date, db_err_acc_no, db_err_acc_date;
+    done_attr_count := c_done_atr%ROWCOUNT;
+    CLOSE c_done_atr;
+/*
+DBMS_OUTPUT.put_line('no - '||db_done_acc_no||'.');
+DBMS_OUTPUT.put_line('err - '||db_err_acc_no||'.');
+DBMS_OUTPUT.put_line('cn - '||done_attr_count||'.');
+*/
+  EXCEPTION
+    WHEN OTHERS THEN
+      IF c_done_atr%ISOPEN THEN
+        CLOSE c_done_atr;
+      END IF;
+  END;
+
+/******************************************************************************/
+
 END;
