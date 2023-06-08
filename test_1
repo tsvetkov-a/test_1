@@ -1,93 +1,56 @@
-function get_blob_from_url (p_url in varchar2) return blob
-as
-  l_http_request   utl_http.req;
-  l_http_response  utl_http.resp;
-  l_raw            raw(32767); 
-  l_returnvalue    blob;
+procedure add_works_codd(o_id number, dept_id number) is
+    w_id ppo_voldates.id%type;
 
-begin
-asdsad
-  /*
+    function add_work(w_cat varchar2, w_kind varchar2, w_exec number) return number is
+      w_id number;
+    begin
+      insert into ppo_voldates(ord_id, voldate_type, category, kind, executor, value, measure, volume, is_working) values (o_id, 'WORK', w_cat, w_kind, w_exec, 0, 'км', 0, 'Y') returning id into w_id;
+      return w_id;
+    end;
 
-  Purpose:      Get blob from URL 
-
-  Remarks:      
-
-  Who     Date        Description
-  ------  ----------  --------------------------------
-  MBR     01.01.2008  Created
-
-  */
-
-  dbms_lob.createtemporary (l_returnvalue, false);
-
-  l_http_request  := utl_http.begin_request (p_url);
-  l_http_response := utl_http.get_response (l_http_request);
-
+    procedure add_prd(oper number, emp number) is
+    begin
+      insert into ppo_productions(voldate_id, stage, ro_id, re_id)
+      values(w_id, (select stage from ref_operations where id = oper), oper, emp);
+    end;
   begin
-    loop
-      utl_http.read_raw(l_http_response, l_raw, 32767);
-      dbms_lob.writeappend (l_returnvalue, utl_raw.length(l_raw), l_raw);
+    w_id := add_work('278','810',200339);
+    add_prd(550487,207324);
+    add_prd(550488,202468);
+
+    for o in (
+      select id
+      from (select 550489 v1, 550594 v2, 550595 v3, 550596 v4, 550490 v5, 550491 v6, 550616 v7, 550617 v8, 550618 v9, 550619 v10 from dual)
+      unpivot (id for t in (v1, v2, v3, v4, v5, v6, v7, v8, v9, v10))
+    ) loop
+      add_prd(o.id, 207163);
     end loop;
-  exception
-    when utl_http.end_of_body then
-      utl_http.end_response(l_http_response);
-  end;
 
-  return l_returnvalue;
-
-exception
-  when others then
-    utl_http.end_response (l_http_response);
-    dbms_lob.freetemporary (l_returnvalue);
-    raise;
-
-end get_blob_from_url;
-
-function get_clob_from_url (p_url in varchar2) return clob
-as
-  l_http_request   utl_http.req;
-  l_http_response  utl_http.resp;
-  l_text           varchar2(32767);
-  l_returnvalue    clob;
-
-begin
-
-
-  /*
-
-  Purpose:      get clob from URL 
-
-  Remarks:      
-
-  Who     Date        Description
-  ------  ----------  --------------------------------
-  MBR     01.01.2008  Created
-
-  */
-
-  dbms_lob.createtemporary(l_returnvalue, false);
-
-  l_http_request  := utl_http.begin_request (p_url);
-  l_http_response := utl_http.get_response (l_http_request);
-
-  begin
-    loop
-      utl_http.read_text (l_http_response, l_text, 32767);
-      dbms_lob.writeappend (l_returnvalue, length(l_text), l_text);
+    for o in (
+      select id, (case dept_id when 200339 then 201773 when 200347 then 200522 when 200349 then 200587 when 200341 then 207163 when 200337 then 200353 end) e_id
+      from (select 550492 v1, 550587 v2, 550589 v3, 550591 v4, 550592 v5, 550593 v6, 550610 v7, 550611 v8, 550612 v9, 550613 v10, 550614 v11, 550615 v12 from dual)
+      unpivot (id for t in (v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12))
+    ) loop
+      add_prd(o.id, o.e_id);
     end loop;
-  exception
-    when utl_http.end_of_body then
-      utl_http.end_response (l_http_response);
+
+    add_prd(550493,201769);
+
+    for o in (select id from (select 550494 v1, 550621 v2, 550622 v3, 550623 v4, 550625 v5, 550624 v6, 550626 v7 from dual) unpivot (id for t in (v1, v2, v3, v4, v5, v6, v7))) loop
+      add_prd(o.id, 201773);
+    end loop;
+
+    add_prd(550495,201780);
+    add_prd(550497,206541);
+    w_id := add_work('278','907',201501);
+    w_id := add_work('278','912',200341);
+    if dept_id = 200337 then
+      w_id := add_work('278','911',200339);
+    else
+      w_id := add_work('278','911',dept_id);
+    end if;
+    w_id := add_work('278','909',200339);
+    w_id := add_work('278','908',200339);
+    w_id := add_work('278','913',200339);
+    w_id := add_work('278','914',200339);
   end;
-
-  return l_returnvalue;
-
-exception
-  when others then
-    utl_http.end_response (l_http_response);
-    dbms_lob.freetemporary(l_returnvalue);
-    raise;
-
-end get_clob_from_url;
-
