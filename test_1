@@ -54,3 +54,60 @@ procedure add_works_codd(o_id number, dept_id number) is
     w_id := add_work('278','913',200339);
     w_id := add_work('278','914',200339);
   end;
+
+
+
+  function buh_open_orders(sd date := trunc(sysdate), ed date := trunc(sysdate)) return xmltype is
+    x xmltype;
+  begin
+    select sys_xmlagg(xmlelement("ROW", xmlforest(
+    ( case
+      when o.no like '6/%' then '6'
+      when o.no like '7/%' then '7'
+      when o.no like '10о/%' then '10'
+      when o.no like '9/%' then '9'
+      when o.no like '8/%' then '8'
+      when o.no like '3с/%' then '3с'
+      when o.no like '1с/%' then '1с'
+      else null
+      end) dept
+    , o.gen_no, o.no
+    , (select substr(clobagg(','||s.done_no),2) from (select distinct w.ord_id, s.done_no from ppo_voldates w join ppo_voldates s on s.voldate_id = w.id where s.done_no is not null) s where s.ord_id = o.id) d_no
+    , to_char(o.open_date, 'dd.mm.yyyy') open_date, to_char(o.e_date, 'dd.mm.yyyy') e_date
+    , e.short_name, e.ent_type, e.inn, e.kpp
+    , ea.adr_type, ea.compact_adr, ea.tel
+    , ec.role, ec.account_num, rb.name, rb.bik, rb.c_acc
+    ))) into x
+    from ppo_orders o left outer join ent_entities e on e.id = o.ent_id
+      left outer join ent_addresses ea on ea.ent_id = e.id and ea.main_addr = 'Y'
+      left outer join ent_account ec on ec.ent_id = e.id and ec.main_fin = 'Y' left outer join ref_banks rb on rb.id = ec.rb_id
+    where o.open_date between sd and ed;
+
+    return x;
+  end;
+  
+  
+    function buh_sf_paydocs(sd date := trunc(sysdate), ed date := trunc(sysdate)) return xmltype is
+    x xmltype;
+  begin
+    execute immediate
+    'select sys_xmlagg(xmlelement("ROW", xmlforest(rownum as "NN", sf, to_char(sf_date,''dd.mm.yyyy'') as "SF_DATE", pp))) x from (
+      --заказ
+      select o.done_doc_n sf, o.done_doc_date sf_date, substr(clobagg(distinct '',''||p.no||'' ''||to_char((select val_date from peo_paydocs where paydoc_id is null start with id = p.id connect by prior paydoc_id = id),''dd.mm.yyyy'')), 2) pp
+      from ppo_orders o join vw_peopay v on v.ord_id = o.id join peo_paydocs p on p.id = v.paydoc_id
+      where p.no not like ''%__%'' escape  ''_''
+        and o.done_doc_type = ''2''
+        and o.done_doc_n is not null
+        and o.done_doc_date between :sd and :ed
+      group by o.done_doc_n, o.done_doc_date
+      union all
+      --этап
+      select s.acc_no sf, s.acc_date sf_date, substr(clobagg(distinct '',''||nvl(substr(p.no, 1, instr(p.no, ''_'')-1), p.no)||'' ''||to_char((select val_date from peo_paydocs where paydoc_id is null start with id = p.id connect by prior paydoc_id = id),''dd.mm.yyyy'')), 2) pp
+      from ppo_voldates w join ppo_voldates s on s.voldate_id = w.id join vw_peopay v on v.ord_id = w.ord_id and v.done_no = s.done_no join peo_paydocs p on p.id = v.paydoc_id
+      where s.acc_no is not null
+        and s.acc_date between :sd and :ed
+      group by s.acc_no, s.acc_date
+    )' into x using sd, ed, sd, ed;
+
+    return x;
+  end;
