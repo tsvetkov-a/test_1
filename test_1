@@ -1,113 +1,43 @@
-procedure add_works_codd(o_id number, dept_id number) is
-    w_id ppo_voldates.id%type;
+Числовые типы данных:
 
-    function add_work(w_cat varchar2, w_kind varchar2, w_exec number) return number is
-      w_id number;
-    begin
-      insert into ppo_voldates(ord_id, voldate_type, category, kind, executor, value, measure, volume, is_working) values (o_id, 'WORK', w_cat, w_kind, w_exec, 0, 'км', 0, 'Y') returning id into w_id;
-      return w_id;
-    end;
+NUMBER - числовой тип данных с фиксированной или плавающей точкой.
+INTEGER - целочисленный тип данных.
+BINARY_INTEGER - целочисленный тип данных с предопределенным размером.
+PLS_INTEGER - целочисленный тип данных с оптимизированной производительностью.
+Символьные типы данных:
 
-    procedure add_prd(oper number, emp number) is
-    begin
-      insert into ppo_productions(voldate_id, stage, ro_id, re_id)
-      values(w_id, (select stage from ref_operations where id = oper), oper, emp);
-    end;
-  begin
-    w_id := add_work('278','810',200339);
-    add_prd(550487,207324);
-    add_prd(550488,202468);
+CHAR - символьный тип данных фиксированной длины.
+VARCHAR2 - символьный тип данных переменной длины.
+NCHAR - символьный тип данных фиксированной длины для хранения Юникод-символов.
+NVARCHAR2 - символьный тип данных переменной длины для хранения Юникод-символов.
+Типы данных для работы с датами и временем:
 
-    for o in (
-      select id
-      from (select 550489 v1, 550594 v2, 550595 v3, 550596 v4, 550490 v5, 550491 v6, 550616 v7, 550617 v8, 550618 v9, 550619 v10 from dual)
-      unpivot (id for t in (v1, v2, v3, v4, v5, v6, v7, v8, v9, v10))
-    ) loop
-      add_prd(o.id, 207163);
-    end loop;
+DATE - тип данных для хранения даты и времени.
+TIMESTAMP - тип данных для хранения даты, времени и миллисекунд.
+INTERVAL - тип данных для работы с интервалами времени.
+Логический тип данных:
 
-    for o in (
-      select id, (case dept_id when 200339 then 201773 when 200347 then 200522 when 200349 then 200587 when 200341 then 207163 when 200337 then 200353 end) e_id
-      from (select 550492 v1, 550587 v2, 550589 v3, 550591 v4, 550592 v5, 550593 v6, 550610 v7, 550611 v8, 550612 v9, 550613 v10, 550614 v11, 550615 v12 from dual)
-      unpivot (id for t in (v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12))
-    ) loop
-      add_prd(o.id, o.e_id);
-    end loop;
+BOOLEAN - логический тип данных, принимающий значения TRUE, FALSE или NULL.
+Другие типы данных:
 
-    add_prd(550493,201769);
-
-    for o in (select id from (select 550494 v1, 550621 v2, 550622 v3, 550623 v4, 550625 v5, 550624 v6, 550626 v7 from dual) unpivot (id for t in (v1, v2, v3, v4, v5, v6, v7))) loop
-      add_prd(o.id, 201773);
-    end loop;
-
-    add_prd(550495,201780);
-    add_prd(550497,206541);
-    w_id := add_work('278','907',201501);
-    w_id := add_work('278','912',200341);
-    if dept_id = 200337 then
-      w_id := add_work('278','911',200339);
-    else
-      w_id := add_work('278','911',dept_id);
-    end if;
-    w_id := add_work('278','909',200339);
-    w_id := add_work('278','908',200339);
-    w_id := add_work('278','913',200339);
-    w_id := add_work('278','914',200339);
-  end;
+BLOB - тип данных для хранения двоичных данных большого размера.
+CLOB - тип данных для хранения символьных данных большого размера.
+RAW - тип данных для хранения необработанных двоичных данных.
+LONG - тип данных для хранения длинных символьных данных.
 
 
+ALTER TABLE название_таблицы
+ADD (название_столбца тип_данных [ограничения]);
 
-  function buh_open_orders(sd date := trunc(sysdate), ed date := trunc(sysdate)) return xmltype is
-    x xmltype;
-  begin
-    select sys_xmlagg(xmlelement("ROW", xmlforest(
-    ( case
-      when o.no like '6/%' then '6'
-      when o.no like '7/%' then '7'
-      when o.no like '10о/%' then '10'
-      when o.no like '9/%' then '9'
-      when o.no like '8/%' then '8'
-      when o.no like '3с/%' then '3с'
-      when o.no like '1с/%' then '1с'
-      else null
-      end) dept
-    , o.gen_no, o.no
-    , (select substr(clobagg(','||s.done_no),2) from (select distinct w.ord_id, s.done_no from ppo_voldates w join ppo_voldates s on s.voldate_id = w.id where s.done_no is not null) s where s.ord_id = o.id) d_no
-    , to_char(o.open_date, 'dd.mm.yyyy') open_date, to_char(o.e_date, 'dd.mm.yyyy') e_date
-    , e.short_name, e.ent_type, e.inn, e.kpp
-    , ea.adr_type, ea.compact_adr, ea.tel
-    , ec.role, ec.account_num, rb.name, rb.bik, rb.c_acc
-    ))) into x
-    from ppo_orders o left outer join ent_entities e on e.id = o.ent_id
-      left outer join ent_addresses ea on ea.ent_id = e.id and ea.main_addr = 'Y'
-      left outer join ent_account ec on ec.ent_id = e.id and ec.main_fin = 'Y' left outer join ref_banks rb on rb.id = ec.rb_id
-    where o.open_date between sd and ed;
+ALTER TABLE employees
+ADD (email VARCHAR2(100));
 
-    return x;
-  end;
-  
-  
-    function buh_sf_paydocs(sd date := trunc(sysdate), ed date := trunc(sysdate)) return xmltype is
-    x xmltype;
-  begin
-    execute immediate
-    'select sys_xmlagg(xmlelement("ROW", xmlforest(rownum as "NN", sf, to_char(sf_date,''dd.mm.yyyy'') as "SF_DATE", pp))) x from (
-      --заказ
-      select o.done_doc_n sf, o.done_doc_date sf_date, substr(clobagg(distinct '',''||p.no||'' ''||to_char((select val_date from peo_paydocs where paydoc_id is null start with id = p.id connect by prior paydoc_id = id),''dd.mm.yyyy'')), 2) pp
-      from ppo_orders o join vw_peopay v on v.ord_id = o.id join peo_paydocs p on p.id = v.paydoc_id
-      where p.no not like ''%__%'' escape  ''_''
-        and o.done_doc_type = ''2''
-        and o.done_doc_n is not null
-        and o.done_doc_date between :sd and :ed
-      group by o.done_doc_n, o.done_doc_date
-      union all
-      --этап
-      select s.acc_no sf, s.acc_date sf_date, substr(clobagg(distinct '',''||nvl(substr(p.no, 1, instr(p.no, ''_'')-1), p.no)||'' ''||to_char((select val_date from peo_paydocs where paydoc_id is null start with id = p.id connect by prior paydoc_id = id),''dd.mm.yyyy'')), 2) pp
-      from ppo_voldates w join ppo_voldates s on s.voldate_id = w.id join vw_peopay v on v.ord_id = w.ord_id and v.done_no = s.done_no join peo_paydocs p on p.id = v.paydoc_id
-      where s.acc_no is not null
-        and s.acc_date between :sd and :ed
-      group by s.acc_no, s.acc_date
-    )' into x using sd, ed, sd, ed;
+Чтобы добавить значение в отдельный столбец в таблице Oracle, можно использовать оператор UPDATE. Вот пример синтаксиса запроса:
+UPDATE название_таблицы
+SET название_столбца = значение
+[WHERE условие];
 
-    return x;
-  end;
+чтобы добавить значение "john@example.com" в столбец "email" для строки, удовлетворяющей определенному условию, запрос может выглядеть так:
+UPDATE employees
+SET email = 'john@example.com'
+WHERE employee_id = 1;
