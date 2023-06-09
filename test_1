@@ -1,13 +1,13 @@
 SELECT DISTINCT referenced_owner, referenced_name
 FROM all_dependencies
-WHERE owner = '<имя_схемы>'
-  AND name = '<имя_пакета>'
+WHERE owner = 'PPO'
+  AND name = 'MKA_AGR'
   AND type = 'PACKAGE BODY'
   AND referenced_type = 'TABLE'
   AND referenced_name IN (
     SELECT referenced_name
     FROM all_dependencies
-    WHERE owner = '<имя_схемы>'
-      AND name = '<имя_процедуры_или_функции>'
+    WHERE owner = 'PPO'
+      AND name = 'add_file_on_resource'
       AND type IN ('PROCEDURE', 'FUNCTION')
   );
