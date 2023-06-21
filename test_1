@@ -1,13 +1,13 @@
-SELECT DISTINCT referenced_owner, referenced_name
-FROM all_dependencies
-WHERE owner = 'PPO'
-  AND name = 'MKA_AGR'
-  AND type = 'PACKAGE BODY'
-  AND referenced_type = 'TABLE'
-  AND referenced_name IN (
-    SELECT referenced_name
-    FROM all_dependencies
-    WHERE owner = 'PPO'
-      AND name = 'add_file_on_resource'
-      AND type IN ('PROCEDURE', 'FUNCTION')
-  );
+Если в заказе заполнен Грузополучатель, то выводим его: ppo_orders.ent_rec_id = ent_entities.id => выводим ent_entities.short_name
+Если нет, то выводим Заказчика:
+Ppo_orders.ent_rec_id is null =>
+Ppo_orders.ent_id = ent_entities.id = > выводим ent_entities.short_name
+
+{краткое_наимен_груз_счёт}
+
+Если ppo_orders.ent_rec_id is not null, то выводим адрес Грузополучателя:
+Ppo_orders.ent_rec_id => ent_entities.id = ent_addresses.ent_id = > ent_addresses.compact_adr (where main_addr = ‘Y’)
+Иначе выводим адрес заказчика, ppo_orders.ent_rec_id is null
+Ppo_orders.ent_id => ent_entities.id
+
+{адрес_груз_счёт}
