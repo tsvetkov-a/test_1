@@ -3,6 +3,16 @@ Ppo_orders.ent_rec_id => ent_entities.id = ent_addresses.ent_id = > ent_addresse
 Иначе выводим адрес заказчика, ppo_orders.ent_rec_id is null
 Ppo_orders.ent_id => ent_entities.id
 
+SELECT 
+    CASE 
+        WHEN po.ent_rec_id IS NOT NULL THEN adr.compact_adr
+        ELSE ent.id
+    END AS {адрес_груз_счет}
+FROM ppo_orders po
+LEFT JOIN ent_entities ent ON po.ent_rec_id = ent.id OR po.ent_id = ent.id
+LEFT JOIN ent_addresses adr ON ent.id = adr.ent_id AND adr.main_addr = 'Y'
+
+
 Решение:
 
 
@@ -12,3 +22,10 @@ Ppo_orders.ent_id => ent_entities.id
 Иначе – пусто.
 Если инвестор в заказе заполнен, то выводим его. Его нет, то пусто.
 
+SELECT 
+    CASE 
+        WHEN po.ent_inv_id IS NOT NULL THEN ent.short_name
+        ELSE NULL
+    END AS {краткое наимен. Инв_счёт_комм}
+FROM ppo_orders po
+LEFT JOIN ent_entities ent ON po.ent_inv_id = ent.id
