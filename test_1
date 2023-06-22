@@ -29,3 +29,9 @@ SELECT
     END AS {краткое наимен. Инв_счёт_комм}
 FROM ppo_orders po
 LEFT JOIN ent_entities ent ON po.ent_inv_id = ent.id
+
+
+{Адрес_инв_счёт_комм}
+Если ppo_orders.inv_id is not null, то выводим адрес Инвестора:
+Ppo_orders.inv_id => ent_entities.id = ent_addresses.ent_id = > ent_addresses.compact_adr (where main_addr = ‘Y’)
+
