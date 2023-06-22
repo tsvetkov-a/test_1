@@ -24,11 +24,11 @@ case when o.ent_inv_id is not null then ent.short_name else null
 можно заменить на
 ent.short_name
 
-и просто добавить через add_label без условий. В подзапросе, если пусто, то и в метку попадёт пусто. 
+(SELECT 
+    ent.short_name
+FROM ppo_orders o 
+LEFT JOIN ent_entities ent ON o.ent_inv_id = ent.id)
 
-Делать проверку на наличие значения нужно только если в зависимости от одного значения должно выводиться другое. Например, есть значения val1, val2. Нужно выводить val2, если заполнено val1, тогда в процедуре будет что-то такое:
-
-if val1 is not null then add_label(‘метка’, val2); else add_label(‘метка’, ‘’);  end if;
 
 По метке {краткое наимен. Инв_счёт_комм} я составил примерно так:
 (select case when o.ent_inv_id is not null then ent.short_name else null from ppo_orders o left join ent_entities ent on o.ent_inv_id = ent.id)
