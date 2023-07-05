@@ -1,43 +1,38 @@
-Если ppo_orders.ent_rec_id is not null, то выводим адрес Грузополучателя:
-Ppo_orders.ent_rec_id => ent_entities.id = ent_addresses.ent_id = > ent_addresses.compact_adr (where main_addr = ‘Y’)
-Иначе выводим адрес заказчика, ppo_orders.ent_rec_id is null
-Ppo_orders.ent_id => ent_entities.id
+declare
+  l_xml xmltype;
+  xml_clob varchar2(32767);
+  xml_blob blob;
+  xml_out blob;
+  file_out_name varchar2(1000);
+  o_id number; s_id number; id_list number; stg_id number;
+begin
+  o_id := 17466;
+  s_id := null;
+  id_list := null;
+  stg_id := null;
+  xml_blob := ws.get_file('\\mggt\work\IITP\Персональные папки\Ястребов\Тест\Геодезия полный gps_taheom_V4.xml');
+  xml_clob :=  lob_utils.blob2clob(xml_blob, 'utf8');
+  file_out_name := '\\mggt\work\IITP\Персональные папки\Ястребов\Тест\Геодезия полный gps_taheom_V4 с заполненными метками.xml';
+  dbms_output.put_line(xml_clob);
+  
+  --добавление меток (запись данных в office_labels)
+  delete from office_labels;
+  labels.orders(o_id); 
+  labels.rep_geod(o_id); 
+--  labels.rep_geod_stg(s_id);
+--  labels.rep_geod_invent(o_id, id_list);
+--  labels.rep_geod_files_path(o_id, s_id);
+--  labels.rep_geod_iul(o_id);
+--  labels.rep_geod_iul_stg(stg_id);
+--  labels.rep_geod_act(o_id);
 
-      (select case when o.ent_rec_id is not null then adr.compact_adr else ent.id from ppo_orders o 
-left join ent_entities ent on o.ent_rec_id = ent.id or o.ent_id = ent.id left join ent_addresses adr on ent.id = adr.ent_id and adr.main_addr = 'Y') дать название
+  for lbl in (select l_name, l_type, l_value from office_labels) loop
+    xml_clob := replace(xml_clob,lbl.l_name,lbl.l_value);
+  --dbms_output.put_line(lbl.l_name ||' '||lbl.l_value);
+  end loop;
+  dbms_output.put_line(xml_clob);
 
-
-
-Решение:
-
-
-4.  {краткое наимен. Инв_счёт_комм}
-Если ppo_orders.ent_inv_id заполнено, 
-то выводить значение ent_entites.short_name соответствующее ppo_ordres.inv_id = ent_entities.id
-Иначе – пусто.
-Если инвестор в заказе заполнен, то выводим его. Его нет, то пусто.
-
-(select case when o.ent_inv_id is not null then ent.short_name else null from ppo_orders o left join ent_entities ent on o.ent_inv_id = ent.id) дать название
-Хорошо! Часть
-case when o.ent_inv_id is not null then ent.short_name else null
-
-можно заменить на
-ent.short_name
-
-(SELECT 
-    ent.short_name
-FROM ppo_orders o 
-LEFT JOIN ent_entities ent ON o.ent_inv_id = ent.id)
-
-
-По метке {краткое наимен. Инв_счёт_комм} я составил примерно так:
-(select case when o.ent_inv_id is not null then ent.short_name else null from ppo_orders o left join ent_entities ent on o.ent_inv_id = ent.id)
-
-
-
-{Адрес_инв_счёт_комм}
-Если ppo_orders.inv_id is not null, то выводим адрес Инвестора:
-Ppo_orders.inv_id => ent_entities.id = ent_addresses.ent_id = > ent_addresses.compact_adr (where main_addr = ‘Y’)
-, (select case when o.inv_id is not null then adr.compact_adr else null from ppo_orders o 
-left join ent_entities ent on o.inv_id = ent.id left join ent_addresses adr on ent.id = adr.ent_id and adr.main_addr = 'Y') дать название
-
+  --тут конвертация xml_clob в файл
+  xml_out := lob_utils.clob2blob(xml_clob, 'utf8');
+  ws.save_file(file_out_name, xml_out);
+end;
