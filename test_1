@@ -36,3 +36,6 @@ begin
   xml_out := lob_utils.clob2blob(xml_clob, 'utf8');
   ws.save_file(file_out_name, xml_out);
 end;
+
+
+NzE1NjYxNzI3ODgyOqYs1QHzLLiZ7c0UhnLr5MwQQ3fy
